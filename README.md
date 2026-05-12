@@ -28,15 +28,31 @@ ServiceRobot_AI/
 ├── requirements.txt         # 필요 라이브러리 목록
 └── README.md                # 프로젝트 설명서
 
+```
+
 ## 💻 실행 방법
-1. 패키지 설치
+
+### 1. 패키지 설치
+
+```bash
 pip install -r requirements.txt
 
-2. ai 추론 서버 실행
+```
+
+### 2. AI 추론 서버 실행
+
+```bash
 cd src
 uvicorn app:app --reload
 
-3. 클라이언트 테스트 ( 새 터미널 )
+```
+
+### 3. 클라이언트 통신 테스트 (새 터미널 열기)
+
+```bash
 cd src
 python client_test.py
+
+```
+
 
