@@ -2,7 +2,6 @@ numpy==2.4.4
 pandas==3.0.2
 scikit-learn==1.8.0
 lightgbm==4.6.0
-torch==2.11.0+cu128
 fastapi==0.136.1
 uvicorn==0.46.0
 pydantic==2.13.4
