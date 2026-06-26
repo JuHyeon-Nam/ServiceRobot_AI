@@ -1,0 +1,58 @@
+{
+ "err_map": {
+  "E-ENV-C": 0,
+  "E-ENV-O": 1,
+  "E-INF-A": 2,
+  "E-INF-E": 3,
+  "E-RBT-B": 4,
+  "E-RBT-E": 5,
+  "E-RBT-N": 6,
+  "E-RBT-S": 7,
+  "정상": 8
+ },
+ "devtype_map": {
+  "물류로봇": 0,
+  "배송로봇": 1,
+  "서빙로봇": 2,
+  "안내로봇": 3,
+  "청소로봇": 4
+ },
+ "mainstate_map": {
+  "CHARGING": 0,
+  "CLEANING": 1,
+  "DELIVERY": 2,
+  "EMERGENCY": 3,
+  "ERROR": 4,
+  "ESTOP": 5,
+  "MOVE": 6,
+  "OFFLINE": 7,
+  "OPERATION": 8,
+  "PAUSED": 9,
+  "STANDBY": 10
+ },
+ "crowd_map": {
+  "LOW": 0,
+  "MIDDLE": 1,
+  "HIGH": 2
+ },
+ "dyn": [
+  "batteryLevel",
+  "speed",
+  "x",
+  "y",
+  "degree",
+  "collision",
+  "obstacle"
+ ],
+ "stat": [
+  "isOffline",
+  "nowCharging",
+  "emergencyStop",
+  "batteryUse",
+  "batteryCycleCount",
+  "distance",
+  "crowd",
+  "deviceType",
+  "mainState"
+ ]
+}

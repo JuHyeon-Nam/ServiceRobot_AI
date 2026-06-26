@@ -14,7 +14,12 @@ import warnings; warnings.filterwarnings('ignore')
 
 DATA = '../data/processed'
 
+# 모델이 쓰는 동적센서: 절대좌표 x,y(index 2,3)는 제외(사이트별 좌표 암기 방지).
+# DYN 원순서=[batteryLevel,speed,x,y,degree,collision,obstacle]
+MODEL_DYN_IDX = [0, 1, 4, 5, 6]  # batteryLevel, speed, degree, collision, obstacle
+
 def feat(X, S):
+    X = X[:, :, MODEL_DYN_IDX]
     N = X.shape[0]
     eng = np.hstack([
         X.reshape(N, -1), np.mean(X, 1), np.std(X, 1),
@@ -60,11 +65,12 @@ def main():
     print(classification_report(yva, yp, digits=3, target_names=names))
 
     # 피처 중요도 top12
+    mdyn = [meta['dyn'][i] for i in MODEL_DYN_IDX]
     imp = model.feature_importances_
-    eng_names = ([f'{s}_t{t}' for t in range(30) for s in meta['dyn']]
-                 + [f'{s}_mean' for s in meta['dyn']] + [f'{s}_std' for s in meta['dyn']]
-                 + [f'{s}_trend' for s in meta['dyn']]
-                 + [f'fft{k}_{s}' for k in range(15) for s in meta['dyn']]
+    eng_names = ([f'{s}_t{t}' for t in range(30) for s in mdyn]
+                 + [f'{s}_mean' for s in mdyn] + [f'{s}_std' for s in mdyn]
+                 + [f'{s}_trend' for s in mdyn]
+                 + [f'fft{k}_{s}' for k in range(15) for s in mdyn]
                  + meta['stat'])
     print('\n=== 피처 중요도 Top12 ===')
     for i in np.argsort(imp)[::-1][:12]:
@@ -75,7 +81,7 @@ def main():
     json.dump({'classes': model.classes_.tolist(), 'class_names': names,
                'n_features': Xtr.shape[1], 'val_acc': round(acc, 4),
                'val_macro_f1': round(f1m, 4), 'best_iteration': int(model.best_iteration_),
-               'dyn': meta['dyn'], 'stat': meta['stat'], 'err_map': err_map},
+               'dyn': meta['dyn'], 'model_dyn_idx': MODEL_DYN_IDX, 'stat': meta['stat'], 'err_map': err_map},
               open(f'{DATA}/robot_pdm_enhanced_meta.json', 'w', encoding='utf-8'),
               ensure_ascii=False, indent=1)
     sz = os.path.getsize(f'{DATA}/robot_pdm_enhanced.txt') / 1e6

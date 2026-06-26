@@ -10,6 +10,7 @@ build_enhanced_dataset.py
 """
 import os, sys, glob, zipfile, json
 import numpy as np
+import pandas as pd
 from collections import defaultdict
 
 BASE = r"C:\Users\SSAFY\Downloads\42.실내공간 유지관리 서비스 로봇 데이터\3.개방데이터\1.데이터"
@@ -100,8 +101,9 @@ def main():
     print("errorCode 매핑:", err_map, flush=True)
     print("deviceType:", devtype_map, "| mainState 수:", len(mainstate_map), flush=True)
 
-    def build(by_dev):
+    def build(by_dev, capture_display=False):
         Xs, Ss, ys = [], [], []
+        disp = []  # (robot, x, y, degree) at target frame — 대시보드 재생용
         for dev, recs in by_dev.items():
             recs.sort(key=lambda r: r["createdAt"])
             if len(recs) <= WIN:
@@ -115,12 +117,16 @@ def main():
                 ms = mainstate_map.get(end["mainState"], 0)
                 Ss.append(np.concatenate([stat[i + WIN], [dtv, ms]]))
                 ys.append(err_map[end["errorCode"]])
-        return (np.asarray(Xs, dtype=np.float32),
-                np.asarray(Ss, dtype=np.float32),
-                np.asarray(ys, dtype=np.int64))
+                if capture_display:
+                    disp.append((dev, end["deviceType"], end["x"], end["y"],
+                                 end["degree"], end["errorCode"]))
+        out = (np.asarray(Xs, dtype=np.float32),
+               np.asarray(Ss, dtype=np.float32),
+               np.asarray(ys, dtype=np.int64))
+        return (out + (disp,)) if capture_display else out
 
     Xtr, Str, ytr = build(tr_dev)
-    Xva, Sva, yva = build(va_dev)
+    Xva, Sva, yva, disp = build(va_dev, capture_display=True)
     print(f"train: X{Xtr.shape} S{Str.shape} y{ytr.shape}", flush=True)
     print(f"val:   X{Xva.shape} S{Sva.shape} y{yva.shape}", flush=True)
 
@@ -131,7 +137,12 @@ def main():
                "mainstate_map": mainstate_map, "crowd_map": CROWD,
                "dyn": DYN, "stat": STAT_NUM + ["deviceType", "mainState"]},
               open(f"{OUT}/enhanced_meta.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    print("저장 완료: enhanced_train.npz / enhanced_val.npz / enhanced_meta.json", flush=True)
+
+    # 대시보드 재생용: val 윈도우와 1:1 정렬된 표시정보(enhanced_val.npz와 index 동일)
+    dd = pd.DataFrame(disp, columns=["robot", "deviceType", "x", "y", "degree", "errorCode"])
+    dd["validx"] = np.arange(len(dd))
+    dd.to_parquet(f"{OUT}/replay_display.parquet", index=False)
+    print(f"저장 완료: enhanced_* / replay_display.parquet ({len(dd)}행, {dd.robot.nunique()}대)", flush=True)
 
 
 if __name__ == "__main__":

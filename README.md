@@ -11,7 +11,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.136-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![Uvicorn](https://img.shields.io/badge/Uvicorn-ASGI-499848?style=flat-square&logo=&logoColor=white)
 
-**모델 2.8MB · 추론 1ms · GPU 불필요 · CPU 단독 동작**
+**모델 2.8MB · 추론 1ms · GPU 불필요 · CPU 단독 동작 · 실시간 관제 대시보드 포함**
 
 </div>
 
@@ -87,6 +87,8 @@ flowchart TD
 
 여기에 **추세선(Drift)·FFT(주파수)** 피처를 수학적으로 추출해 2D 압축으로 유실된 시간 흐름을 보강했습니다.
 
+> 🔍 **일반화를 위한 발견 — 절대좌표 암기 제거**: 초기 모델은 피처 중요도에 `x_t29`(절대 위치)가 높게 잡혔습니다. 검증 결과 *사이트마다 좌표계가 달라* 모델이 위치를 암기하는 과적합이었고, **절대 좌표 x·y를 제거해도 공식 Validation 정확도가 93.3%로 동일**함을 확인했습니다. → 위치 대신 `degree`(진행각 동역학)·누적 마모 신호에 집중하는, 새 현장에서도 일반화되는 모델로 정제.
+
 ### 3. 극단적 불균형 극복 — 실험으로 찾은 최적점
 정상 83% vs 일부 고장 수십 건의 극단적 불균형. SMOTE 강제 증식은 정확도를 붕괴시켜 폐기하고, **정상 클래스를 에러 총합의 3배로 언더샘플링**하는 지점이 정확도·macro-F1을 동시에 최적화함을 그리드 실험으로 확정(2x/3x/5x 비교).
 
@@ -107,6 +109,26 @@ flowchart TD
 
 ---
 
+## 🖥️ 실시간 관제 대시보드 (디지털 트윈)
+
+`dashboard.py` — **실제 로봇 궤적**을 가상 플로어에 재생하면서, 학습된 모델이 각 로봇의 30시점 윈도우를 진단하고 **고장 예측 시 실시간 경고**를 띄우는 관제 화면입니다.
+
+- 🗺️ **플로어 맵**: 5종 로봇 10대가 실제 좌표·진행방향(degree)으로 이동, AI 진단에 따라 🟢정상/🔴경고 색상
+- 🚨 **실시간 경고 피드**: 고장 예측 로봇을 카테고리(환경/인프라/로봇본체)·신뢰도와 함께 표시, 실제 라벨과 대조(🎯정답 표기)
+- 📊 **KPI**: 가동 로봇·정상·경고 수·운영 건전도 실시간 집계
+- ▶️ 재생/정지·속도·프레임 스크럽 컨트롤
+
+```bash
+cd src
+python build_enhanced_dataset.py   # (최초 1회) 원본→데이터+표시정보
+python build_replay.py             # 재생용 데이터+예측 사전계산
+streamlit run dashboard.py         # 관제 화면 실행
+```
+
+> 재생 데이터의 진단은 모델이 학습 때 보는 윈도우와 **100% 동일**하게 사전계산되어, 화면의 진단이 곧 실제 모델 성능(공식 Validation 93.4%)입니다.
+
+---
+
 ## 🛠 기술 스택
 
 **Language & Runtime**
@@ -123,6 +145,10 @@ flowchart TD
 ![Uvicorn](https://img.shields.io/badge/Uvicorn-ASGI-499848?style=flat-square)
 ![Pydantic](https://img.shields.io/badge/Pydantic-v2_검증-E92063?style=flat-square&logo=pydantic&logoColor=white)
 
+**Visualization / Monitoring**
+![Streamlit](https://img.shields.io/badge/Streamlit-관제_대시보드-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)
+![Plotly](https://img.shields.io/badge/Plotly-디지털_트윈_맵-3F4F75?style=flat-square&logo=plotly&logoColor=white)
+
 **기법:** 시계열 2D 압축 · FFT 주파수 피처 · 추세선(Drift) 피처 · 클래스 불균형 언더샘플링 · 공식 Train/Val 분리 평가 · native 모델 직렬화(경량 배포)
 
 ---
@@ -136,10 +162,12 @@ ServiceRobot_AI/
 │   ├── robot_pdm_enhanced_meta.json  # 클래스·피처·성능 메타
 │   └── enhanced_meta.json            # 인코딩 맵(deviceType/mainState/crowd)
 ├── src/
-│   ├── build_enhanced_dataset.py     # ① 원본 zip → 피처 + 공식 split 추출
+│   ├── build_enhanced_dataset.py     # ① 원본 zip → 피처 + 공식 split + 재생 표시정보
 │   ├── train_enhanced.py             # ② 학습 + 공식 Validation 평가
 │   ├── evaluate_enhanced.py          # ③ 저장 모델 독립 측정 + 혼동행렬
 │   ├── app.py                        # ④ FastAPI 실시간 추론 서버
+│   ├── build_replay.py               # ⑤ 대시보드 재생 데이터 + 예측 사전계산
+│   ├── dashboard.py                  # ⑥ Streamlit 실시간 관제 대시보드
 │   ├── analyze_6.py                  # 센서 한계 규명 EDA
 │   └── archive/                      # 초기 실험 20여종(GRU/LSTM/DNN/SMOTE/Optuna…)
 ├── requirements.txt
@@ -195,9 +223,10 @@ POST /predict
 ## 🗺️ 로드맵
 
 - [x] 원본 풀 피처 복원 + 공식 Train/Val 분리 평가
+- [x] 절대좌표 암기 제거(일반화 개선)
 - [x] 경량 모델(2.8MB) native 직렬화 + FastAPI 서빙
-- [ ] **Streamlit 실시간 대시보드** — 센서 스트림 시각화 + 진단 표시(시연용)
-- [ ] **피처 중요도·혼동행렬 시각화** 이미지 첨부
+- [x] **Streamlit 실시간 관제 대시보드** — 디지털 트윈 + 진단/경고
+- [ ] **피처 중요도·혼동행렬 시각화** 이미지 README 첨부
 - [ ] **Docker 패키징** — `docker run` 한 줄 배포
 - [ ] **ONNX 변환** — 엣지/모바일/타 언어 추론 확장
 

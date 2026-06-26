@@ -8,8 +8,10 @@ import numpy as np, lightgbm as lgb, json
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score
 
 DATA = '../data/processed'
+MODEL_DYN_IDX = [0, 1, 4, 5, 6]  # x,y 제외 (train_enhanced.py와 동일)
 
 def feat(X, S):
+    X = X[:, :, MODEL_DYN_IDX]
     N = X.shape[0]
     eng = np.hstack([X.reshape(N, -1), np.mean(X, 1), np.std(X, 1),
         np.mean(X[:, -10:, :], 1) - np.mean(X[:, :10, :], 1),

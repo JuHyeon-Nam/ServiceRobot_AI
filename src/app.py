@@ -29,8 +29,11 @@ app = FastAPI(title="서비스 로봇 실시간 예지보전 AI 서버 🤖")
 print(f"✅ 강화 모델 로드 (피처 {mmeta['n_features']}개, 공식 Validation acc {mmeta['val_acc']*100:.2f}%)")
 
 
+MODEL_DYN_IDX = [0, 1, 4, 5, 6]  # x,y 제외 (학습과 동일)
+
 def make_features(window, ctx):
-    X = np.asarray(window, dtype=np.float32).reshape(1, 30, 7)
+    Xf = np.asarray(window, dtype=np.float32).reshape(1, 30, 7)
+    X = Xf[:, :, MODEL_DYN_IDX]
     eng = np.hstack([
         X.reshape(1, -1), np.mean(X, 1), np.std(X, 1),
         np.mean(X[:, -10:, :], 1) - np.mean(X[:, :10, :], 1),

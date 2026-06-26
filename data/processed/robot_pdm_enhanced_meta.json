@@ -21,10 +21,10 @@
   "E-RBT-S",
   "정상"
  ],
- "n_features": 345,
- "val_acc": 0.9335,
- "val_macro_f1": 0.6227,
- "best_iteration": 46,
+ "n_features": 249,
+ "val_acc": 0.9329,
+ "val_macro_f1": 0.5838,
+ "best_iteration": 73,
  "dyn": [
   "batteryLevel",
   "speed",
@@ -33,6 +33,13 @@
   "degree",
   "collision",
   "obstacle"
+ ],
+ "model_dyn_idx": [
+  0,
+  1,
+  4,
+  5,
+  6
  ],
  "stat": [
   "isOffline",
