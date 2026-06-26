@@ -1,0 +1,59 @@
+{
+ "classes": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8
+ ],
+ "class_names": [
+  "E-ENV-C",
+  "E-ENV-O",
+  "E-INF-A",
+  "E-INF-E",
+  "E-RBT-B",
+  "E-RBT-E",
+  "E-RBT-N",
+  "E-RBT-S",
+  "정상"
+ ],
+ "n_features": 345,
+ "val_acc": 0.9335,
+ "val_macro_f1": 0.6227,
+ "best_iteration": 46,
+ "dyn": [
+  "batteryLevel",
+  "speed",
+  "x",
+  "y",
+  "degree",
+  "collision",
+  "obstacle"
+ ],
+ "stat": [
+  "isOffline",
+  "nowCharging",
+  "emergencyStop",
+  "batteryUse",
+  "batteryCycleCount",
+  "distance",
+  "crowd",
+  "deviceType",
+  "mainState"
+ ],
+ "err_map": {
+  "E-ENV-C": 0,
+  "E-ENV-O": 1,
+  "E-INF-A": 2,
+  "E-INF-E": 3,
+  "E-RBT-B": 4,
+  "E-RBT-E": 5,
+  "E-RBT-N": 6,
+  "E-RBT-S": 7,
+  "정상": 8
+ }
+}

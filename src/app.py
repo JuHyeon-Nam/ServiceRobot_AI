@@ -1,69 +1,90 @@
 """
 서비스 로봇 실시간 예지보전(PdM) AI API 서버
-- 휴대용 LightGBM 모델(robot_pdm_portable.txt, 5.5MB)을 CPU로 추론.
-- 입력: 30시점 x 7센서 = 210개 raw 값. 서버가 학습과 동일한 피처(336개)로 변환.
+- 강화 모델(robot_pdm_enhanced.txt, 2.8MB)을 CPU로 추론.
+- 입력: 30시점 동적센서 7종 윈도우 + 정적/맥락 컨텍스트.
+- 동적센서는 시퀀스 피처(flatten/mean/std/trend/FFT)로, 정적은 그대로 부착.
 """
 import json
 import numpy as np
 import lightgbm as lgb
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 
+DATA = "../data/processed"
+booster = lgb.Booster(model_file=f"{DATA}/robot_pdm_enhanced.txt")
+mmeta = json.load(open(f"{DATA}/robot_pdm_enhanced_meta.json", encoding="utf-8"))
+emeta = json.load(open(f"{DATA}/enhanced_meta.json", encoding="utf-8"))
+
+CLASSES = mmeta["classes"]        # 모델 확률열 순서(=정렬된 클래스 인덱스)
+NAMES = mmeta["class_names"]       # 실제 errorCode 문자열
+DEVMAP = emeta["devtype_map"]
+MAINMAP = emeta.get("mainstate_map", {})
+CROWDMAP = emeta.get("crowd_map", {"LOW": 0, "MIDDLE": 1, "HIGH": 2})
+
+# 실제 errorCode 접두 기반 카테고리(임의 명칭 만들지 않음)
+CATEGORY = {"E-ENV": "환경 이상", "E-INF": "인프라 이상", "E-RBT": "로봇 본체 이상"}
+
 app = FastAPI(title="서비스 로봇 실시간 예지보전 AI 서버 🤖")
-
-MODEL_PATH = "../data/processed/robot_pdm_portable.txt"
-META_PATH = "../data/processed/robot_pdm_meta.json"
-
-booster = lgb.Booster(model_file=MODEL_PATH)
-meta = json.load(open(META_PATH, encoding="utf-8"))
-CLASSES = meta["classes"]  # 모델이 내놓는 확률 열 순서 -> 실제 클래스 번호
-print(f"✅ 휴대용 모델 로드 완료 (피처 {meta['n_features']}개, holdout acc {meta['holdout_acc']*100:.2f}%)")
-
-STATUS_MAP = {
-    0: "E-RBT-A (구동부 이상)", 1: "E-RBT-B (배터리 전압 저하)",
-    2: "E-RBT-C (통신 모듈 과열)", 3: "E-RBT-D (센서 오동작)",
-    4: "E-RBT-E (바퀴 슬립 감지)", 5: "E-RBT-F (범퍼 충격 감지)",
-    6: "E-RBT-G (모터 전류 급증 - 희귀 고장)", 7: "E-RBT-H (라이다 차단 신호)",
-    8: "E-RBT-I (엔코더 오차 초과)", 9: "Normal (정상 작동 중)",
-}
+print(f"✅ 강화 모델 로드 (피처 {mmeta['n_features']}개, 공식 Validation acc {mmeta['val_acc']*100:.2f}%)")
 
 
-def create_features(X_raw):
-    """train_portable.py와 100% 동일해야 함. (N,30,7) -> (N,336)"""
-    N = X_raw.shape[0]
-    X_flat = X_raw.reshape(N, -1)
-    t_mean = np.mean(X_raw, axis=1)
-    t_std = np.std(X_raw, axis=1)
-    trend = np.mean(X_raw[:, -10:, :], axis=1) - np.mean(X_raw[:, :10, :], axis=1)
-    fft_half = np.abs(np.fft.rfft(X_raw, axis=1))[:, :15, :].reshape(N, -1)
-    return np.hstack([X_flat, t_mean, t_std, trend, fft_half]).astype(np.float32)
+def make_features(window, ctx):
+    X = np.asarray(window, dtype=np.float32).reshape(1, 30, 7)
+    eng = np.hstack([
+        X.reshape(1, -1), np.mean(X, 1), np.std(X, 1),
+        np.mean(X[:, -10:, :], 1) - np.mean(X[:, :10, :], 1),
+        np.abs(np.fft.rfft(X, axis=1))[:, :15, :].reshape(1, -1),
+    ])
+    stat = np.array([[
+        ctx.isOffline, ctx.nowCharging, ctx.emergencyStop, ctx.batteryUse,
+        ctx.batteryCycleCount, ctx.distance, CROWDMAP.get(ctx.crowd, 1),
+        DEVMAP.get(ctx.deviceType, 0), MAINMAP.get(ctx.mainState, 0),
+    ]], dtype=np.float32)
+    return np.hstack([eng, stat]).astype(np.float32)
 
 
-class RobotSensorInput(BaseModel):
-    sensor_data: list  # 210개 (30시점 x 7센서)
+class Context(BaseModel):
+    deviceType: str = "안내로봇"
+    mainState: str = "MOVE"
+    crowd: str = "MIDDLE"
+    isOffline: float = 0
+    nowCharging: float = 0
+    emergencyStop: float = 0
+    batteryUse: float = 0
+    batteryCycleCount: float = 0
+    distance: float = 0
+
+
+class PredictIn(BaseModel):
+    window: list = Field(..., description="30x7 (시점 x [batteryLevel,speed,x,y,degree,collision,obstacle])")
+    context: Context = Context()
 
 
 @app.get("/")
 def root():
-    return {"message": "로봇 예지보전 AI 서버 정상 가동 중", "model_acc": meta["holdout_acc"]}
+    return {"status": "ok", "model_val_acc": mmeta["val_acc"], "classes": NAMES}
+
+
+@app.get("/health")
+def health():
+    return {"ok": True, "n_features": mmeta["n_features"]}
 
 
 @app.post("/predict")
-def predict_robot_status(payload: RobotSensorInput):
-    raw = np.asarray(payload.sensor_data, dtype=np.float64).reshape(30, 7)
-    feats = create_features(raw[np.newaxis, ...])  # (1, 336)
-
-    probs = booster.predict(feats)[0]              # 클래스 확률 (CLASSES 순서)
+def predict(payload: PredictIn):
+    w = payload.window
+    if len(w) != 30 or any(len(r) != 7 for r in w):
+        return {"error": "window는 30x7 형태여야 합니다 (시점30 x 센서7)."}
+    probs = booster.predict(make_features(w, payload.context))[0]
     top = int(np.argmax(probs))
-    pred_class = CLASSES[top]
-    confidence = float(probs[top]) * 100
-
+    code = NAMES[top]
+    cat = "정상" if code == "정상" else CATEGORY.get(code[:5], "이상")
     return {
-        "status_code": pred_class,
-        "status_display": STATUS_MAP[pred_class],
-        "confidence": f"{confidence:.2f}%",
-        "action_required": "None" if pred_class == 9 else "Immediate Inspection",
+        "error_code": code,
+        "category": cat,
+        "confidence": f"{probs[top]*100:.2f}%",
+        "action_required": "None" if code == "정상" else "Immediate Inspection",
     }
 
 
