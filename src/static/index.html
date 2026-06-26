@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>FAB AMHS 실시간 관제</title>
+<style>
+  :root{ --bg:#0b1220; --panel:#0f1830; --line:#22304d; --txt:#e2e8f0; --mut:#8aa0c0;
+         --green:#22c55e; --red:#ef4444; --amber:#f59e0b; }
+  *{box-sizing:border-box} html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--txt);font-family:"Malgun Gothic","Segoe UI",sans-serif;display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:16px;padding:10px 18px;background:#0a0f1d;border-bottom:1px solid var(--line)}
+  header .title{font-size:18px;font-weight:800;letter-spacing:.5px}
+  header .sub{font-size:12px;color:var(--mut)}
+  .live{display:flex;align-items:center;gap:6px;font-size:12px;color:#86efac}
+  .live .dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(34,197,94,.7);animation:pulse 1.4s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.6)}70%{box-shadow:0 0 0 8px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+  .kpis{margin-left:auto;display:flex;gap:10px}
+  .chip{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 12px;font-size:13px}
+  .chip b{font-size:17px;margin-left:6px}
+  .chip.warn b{color:var(--red)} .chip.ok b{color:var(--green)}
+  main{flex:1;display:flex;min-height:0}
+  .stage{flex:1;position:relative} canvas{position:absolute;inset:0;width:100%;height:100%}
+  aside{width:300px;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;padding:14px;gap:14px;overflow:auto}
+  aside h3{margin:0 0 8px;font-size:13px;color:var(--mut);font-weight:700;letter-spacing:.4px}
+  .floor{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;font-size:13px}
+  .floor .b{font-weight:700}
+  .floor .st.ok{color:var(--green)} .floor .st.warn{color:var(--red)}
+  .alert{display:flex;align-items:center;gap:8px;padding:8px 10px;border-left:3px solid var(--red);background:#1b1220;border-radius:6px;margin-bottom:6px;font-size:13px;animation:flash .9s}
+  @keyframes flash{from{background:#3a1620}to{background:#1b1220}}
+  .alert .id{font-weight:800;color:#fca5a5} .alert .c{margin-left:auto;color:var(--mut);font-size:12px}
+  .empty{color:var(--mut);font-size:13px;padding:8px}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <div class="title">FAB AMHS MONITOR</div>
+    <div class="sub">반도체 라인(3F) AGV 실시간 예지보전 관제 · WebSocket Live</div>
+  </div>
+  <div class="live"><span class="dot"></span> LIVE</div>
+  <div class="kpis">
+    <div class="chip">AGV <b id="k-tot">–</b></div>
+    <div class="chip ok">정상 <b id="k-ok">–</b></div>
+    <div class="chip warn">경고 <b id="k-warn">–</b></div>
+  </div>
+</header>
+<main>
+  <div class="stage"><canvas id="cv"></canvas></div>
+  <aside>
+    <div><h3>층별 상태</h3><div id="floors"></div></div>
+    <div><h3>실시간 고장 경고</h3><div id="alerts"><div class="empty">전 AGV 정상 가동 중</div></div></div>
+  </aside>
+</main>
+<script>
+const GREEN="#22c55e", RED="#ef4444", FOUP="#334155";
+const FLOOR_NAMES=["2F","1F","B1"];
+const cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+let layout=null, agvs={}, kpi=null, scale=1, ox=0, oy=0, dpr=Math.min(window.devicePixelRatio||1,2);
+
+function resize(){ const r=cv.parentElement.getBoundingClientRect();
+  cv.width=r.width*dpr; cv.height=r.height*dpr;
+  const s=Math.min(cv.width/232, cv.height/150); scale=s;
+  ox=(cv.width - 232*s)/2; oy=(cv.height - 150*s)/2; }
+window.addEventListener("resize", resize);
+const TX=x=>ox+x*scale, TY=y=>oy+(150-y)*scale;
+
+function rrect(x,y,w,h,r,fill,stroke,lw){ ctx.beginPath(); ctx.moveTo(TX(x)+r,TY(y));
+  const X=TX(x),Y=TY(y+h),W=w*scale,H=h*scale; // y flipped: top-left at (x, y+h)
+  ctx.roundRect(X,Y,W,H,r); if(fill){ctx.fillStyle=fill;ctx.fill();}
+  if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lw||1;ctx.stroke();} }
+
+function drawFab(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  if(!layout) return;
+  // 층 패널
+  for(const f of layout.floors){
+    rrect(6, f.y0, 178, 40, 8*scale, "#0e1830", "#22304d", 1.3);
+    ctx.fillStyle="#16223c"; ctx.fillRect(TX(6.6),TY(f.y0+40)+0, 176.8*scale, 5.4*scale);
+    ctx.fillStyle="#9fb3d4"; ctx.font=`700 ${8*scale}px Malgun Gothic`; ctx.textAlign="left";
+    ctx.fillText(f.name, TX(9), TY(f.y0+37));
+    // 트랙
+    ctx.strokeStyle="#2c3c5e"; ctx.lineWidth=4.4*scale;
+    for(const t of f.tracks){ ctx.beginPath(); ctx.moveTo(TX(t[0]),TY(t[1])); ctx.lineTo(TX(t[2]),TY(t[3])); ctx.stroke(); }
+    ctx.strokeStyle="#3f5a78"; ctx.setLineDash([5*scale,4*scale]); ctx.lineWidth=1*scale;
+    for(const t of f.tracks){ ctx.beginPath(); ctx.moveTo(TX(t[0]),TY(t[1])); ctx.lineTo(TX(t[2]),TY(t[3])); ctx.stroke(); }
+    ctx.setLineDash([]);
+    // 장비
+    for(const tl of f.tools){ rrect(tl.cx-tl.w/2, tl.y, tl.w, tl.h, 2*scale, "#13203a", "#2c3c5e", 1);
+      ctx.fillStyle="#9fb3d4"; ctx.font=`700 ${6.4*scale}px Malgun Gothic`; ctx.textAlign="center";
+      ctx.fillText(tl.label, TX(tl.cx), TY(tl.y+tl.h/2)+2*scale); }
+  }
+  // 스토커 / 리프트
+  const s=layout.stocker; rrect(s.x,s.y,s.w,s.h,8*scale,"#0e1830","#22304d",1.2);
+  ctx.fillStyle="#9fb3d4";ctx.font=`700 ${8*scale}px Malgun Gothic`;ctx.textAlign="center";
+  ctx.fillText("STOCKER",TX(s.x+s.w/2),TY(s.y+s.h-4));
+  for(let r=0;r<s.rows;r++)for(let c=0;c<s.cols;c++) rrect(s.x+2.5+c*6, s.y+4+r*10.3, 5,7.6,1*scale,"#13203a","#2c3c5e",.6);
+  const l=layout.lift; rrect(l.x,l.y,l.w,l.h,8*scale,"#0e1830","#22304d",1.2);
+  ctx.fillText("LIFT",TX(l.x+l.w/2),TY(l.y+l.h-4));
+  for(const cab of l.cabs) rrect(l.x+3,cab.y,8,cab.h,1*scale,"#13203a","#2c3c5e",.8);
+}
+
+function drawAGV(a){
+  const x=TX(a.cx), y=TY(a.cy), col=a.status==="warn"?RED:GREEN, ec=a.status==="warn"?"#b91c1c":"#15803d";
+  // 트레일
+  for(let k=0;k<a.hist.length;k++){ const h=a.hist[k];
+    ctx.beginPath(); ctx.arc(TX(h.x),TY(h.y),0.5*scale,0,7); ctx.fillStyle=col; ctx.globalAlpha=0.05+0.3*k/a.hist.length; ctx.fill(); }
+  ctx.globalAlpha=1;
+  if(a.status==="warn"){ ctx.beginPath(); ctx.arc(x,y,3.4*scale,0,7); ctx.fillStyle="rgba(239,68,68,.16)"; ctx.fill(); }
+  ctx.save(); ctx.translate(x,y); ctx.rotate(-a.ang*Math.PI/180);
+  const S=scale; ctx.beginPath();
+  ctx.moveTo(-2.6*S,-1.3*S); ctx.lineTo(1.3*S,-1.3*S); ctx.lineTo(3.1*S,0); ctx.lineTo(1.3*S,1.3*S); ctx.lineTo(-2.6*S,1.3*S); ctx.closePath();
+  ctx.fillStyle=col; ctx.fill(); ctx.strokeStyle=ec; ctx.lineWidth=0.9*S; ctx.stroke();
+  ctx.fillStyle=FOUP; ctx.fillRect(-1.6*S,-1.0*S,1.9*S,2.0*S);
+  ctx.restore();
+  ctx.fillStyle="#cdd9ee"; ctx.font=`${4.8*scale}px Malgun Gothic`; ctx.textAlign="center";
+  ctx.fillText(a.id, x, y-4.0*scale);
+  if(a.status==="warn"){ ctx.fillStyle="#fca5a5"; ctx.font=`${4.6*scale}px Malgun Gothic`; ctx.fillText(a.label, x, y+5.6*scale); }
+}
+
+function render(){
+  drawFab();
+  for(const id in agvs){ const a=agvs[id];
+    a.cx+=(a.tx-a.cx)*0.25; a.cy+=(a.ty-a.cy)*0.25;
+    let d=a.ta-a.ang; while(d>180)d-=360; while(d<-180)d+=360; a.ang+=d*0.25;
+    if(Math.hypot(a.tx-a.cx,a.ty-a.cy)>25){a.cx=a.tx;a.cy=a.ty;a.ang=a.ta;a.hist=[];}
+    if(!a._t||performance.now()-a._t>60){a.hist.push({x:a.cx,y:a.cy}); if(a.hist.length>10)a.hist.shift(); a._t=performance.now();}
+    drawAGV(a);
+  }
+  requestAnimationFrame(render);
+}
+
+function applyState(m){
+  kpi=m.kpi;
+  document.getElementById("k-tot").textContent=m.kpi.total;
+  document.getElementById("k-ok").textContent=m.kpi.ok;
+  document.getElementById("k-warn").textContent=m.kpi.warn;
+  for(const it of m.agvs){ let a=agvs[it.id];
+    if(!a){a=agvs[it.id]={cx:it.x,cy:it.y,ang:it.ang,hist:[]};}
+    a.tx=it.x;a.ty=it.y;a.ta=it.ang;a.status=it.status;a.id=it.id;a.label=it.label;a.floor=it.floor; }
+  // 층별
+  const fl=document.getElementById("floors"); fl.innerHTML="";
+  m.kpi.per_floor.forEach((w,i)=>{ const ok=5-w;
+    fl.innerHTML+=`<div class="floor"><span class="b">${FLOOR_NAMES[i]} · ${layout?layout.floors[i].name.split('·')[1].trim():''}</span>
+      <span class="st ${w?'warn':'ok'}">정상 ${ok} / 경고 ${w}</span></div>`; });
+  // 경고
+  const al=document.getElementById("alerts");
+  if(!m.alerts.length){ al.innerHTML='<div class="empty">전 AGV 정상 가동 중</div>'; }
+  else{ al.innerHTML=m.alerts.map(a=>`<div class="alert"><span class="id">${a.id}</span>
+      <span>${a.label} · ${FLOOR_NAMES[a.floor]}</span><span class="c">${Math.round(a.conf*100)}%</span></div>`).join(""); }
+}
+
+async function init(){
+  resize();
+  layout=await (await fetch("/api/layout")).json();
+  const proto=location.protocol==="https:"?"wss":"ws";
+  const sock=new WebSocket(`${proto}://${location.host}/ws`);
+  sock.onmessage=e=>applyState(JSON.parse(e.data));
+  sock.onclose=()=>setTimeout(init,1500);
+  requestAnimationFrame(render);
+}
+init();
+</script>
+</body>
+</html>

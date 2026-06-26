@@ -10,5 +10,7 @@ requests==2.34.0
 streamlit==1.58.0
 plotly==6.8.0
 streamlit-autorefresh==1.0.1
-# 시각화 생성(make_visuals.py)
+# 시각화 생성(make_visuals.py / make_floorplan.py)
 matplotlib==3.10.9
+# 실시간 관제 서버(realtime_server.py)
+websockets==16.0

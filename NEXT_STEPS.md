@@ -28,18 +28,19 @@ streamlit run dashboard.py       # 관제 대시보드 실행
 
 ---
 
-## STEP 1 — 진짜 실시간 스트리밍 ⭐ (가장 임팩트 큼)
-**목표:** 지금은 녹화 재생. 이걸 "센서가 실시간으로 흘러들어오는 진짜 관제"로 격상.
-
-**어떻게:**
-1. `simulator.py` 작성 — `replay.parquet`을 0.5초 간격으로 한 프레임씩 흘려보냄.
-2. `app.py`에 WebSocket 엔드포인트 추가(`/ws`) — 시뮬레이터가 보낸 센서를 모델로 진단해 브로드캐스트.
-3. `dashboard.py`가 WebSocket을 구독해 실시간 렌더(현재의 사전계산 대신).
-   - 라이브러리: `websockets` 또는 `paho-mqtt`(+ mosquitto 브로커).
-4. (선택) **MQTT**로 바꾸면 프로필의 *Edge-Cloud/MQTT* 주장과 정확히 연결됨.
+## STEP 1 — 진짜 실시간 스트리밍 ⭐  ✅ 기본 구현 완료
+**구현됨:** `realtime_server.py`(FastAPI + WebSocket `/ws`)가 모델 진단을 실시간 push,
+`static/index.html`(Canvas)가 구독해 AGV를 라이브 렌더. `fab_layout.py`가 도면/경로 단일 소스.
+```bash
+cd src && uvicorn realtime_server:app --reload   # http://127.0.0.1:8000
+```
+**다음 고도화(선택):**
+1. `simulator.py` 분리 — 별도 프로세스가 센서를 흘려보내고 서버는 받기만(진짜 수집-추론 분리).
+2. 서버에서 매 tick `booster.predict`를 직접 호출(현재는 사전계산 진단 스트리밍) → 완전 라이브 추론.
+3. **MQTT**(paho-mqtt + mosquitto)로 전송 계층 교체 → 프로필의 *Edge-Cloud/MQTT*와 직결.
+4. 다중 클라이언트 브로드캐스트 + 재접속/백프레셔 처리.
 
 **왜:** "실시간 관제"가 말이 아니라 실제가 됨. 면접에서 가장 강한 데모.
-**난이도:** 중 · **예상:** 3~5일
 
 ---
 

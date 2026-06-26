@@ -130,7 +130,27 @@ flowchart TD
 
 ![FAB AMHS 관제](assets/control_center.png)
 
-> 📌 데이터·모델은 AI-Hub *서비스 로봇* 공개 데이터지만, 고장 유형(배터리·긴급정지·장애물·충돌위험·층간이송·통신)이 **팹 AGV 예지보전(PdM)에 그대로 대응**되어, 스마트팩토리 AGV 관제로 표현했습니다. `dashboard.py`는 동일 모델의 실시간 추론 버전입니다.
+> 📌 데이터·모델은 AI-Hub *서비스 로봇* 공개 데이터지만, 고장 유형(배터리·긴급정지·장애물·충돌위험·층간이송·통신)이 **팹 AGV 예지보전(PdM)에 그대로 대응**되어, 스마트팩토리 AGV 관제로 표현했습니다.
+
+### ⚡ 실시간 스트리밍 관제 (FastAPI + WebSocket)
+
+정적 재생을 넘어, **모델 진단을 실시간으로 흘려보내는 라이브 관제 웹앱**입니다.
+
+```mermaid
+flowchart LR
+    M["PdM 모델 + AGV 플릿 상태"] -->|tick| S["FastAPI 서버<br/>realtime_server.py"]
+    S -->|WebSocket /ws<br/>JSON state 10Hz| B["브라우저 대시보드<br/>static/index.html"]
+    B -->|Canvas 렌더| V["AGV 실시간 이동 · 진단색 · 경고 피드 · KPI"]
+```
+
+- **서버**(`realtime_server.py`): AMHS 트랙 루프를 따라 AGV 위치를 산출하고, 모델 진단을 WebSocket으로 push (`/ws`), 레이아웃 API(`/api/layout`) 제공
+- **프론트**(`static/index.html`): WebSocket 구독 → Canvas에 AGV를 부드럽게 보간 렌더(코너 추종), 층별 상태·실시간 고장 경고 피드·KPI를 라이브 갱신
+- **공유 레이아웃**(`fab_layout.py`): 층/장비/트랙/AGV 경로의 단일 소스
+
+```bash
+cd src
+uvicorn realtime_server:app --reload      # http://127.0.0.1:8000 접속 → 라이브 관제
+```
 
 - 🗺️ **플로어 맵**: 5종 로봇 10대가 실제 좌표·진행방향(degree)으로 이동, AI 진단에 따라 🟢정상/🔴경고 색상
 - 🚨 **실시간 경고 피드**: 고장 예측 로봇을 카테고리(환경/인프라/로봇본체)·신뢰도와 함께 표시, 실제 라벨과 대조(🎯정답 표기)
@@ -186,7 +206,12 @@ ServiceRobot_AI/
 │   ├── evaluate_enhanced.py          # ③ 저장 모델 독립 측정 + 혼동행렬
 │   ├── app.py                        # ④ FastAPI 실시간 추론 서버
 │   ├── build_replay.py               # ⑤ 대시보드 재생 데이터 + 예측 사전계산
-│   ├── dashboard.py                  # ⑥ Streamlit 실시간 관제 대시보드
+│   ├── realtime_server.py            # ⑥ FastAPI + WebSocket 실시간 관제 서버
+│   ├── fab_layout.py                 #    팹 도면·AMHS 경로 단일 소스(서버/프론트 공유)
+│   ├── static/index.html             #    라이브 관제 대시보드(Canvas + WebSocket)
+│   ├── make_floorplan.py             #    팹 AGV 관제 시각화(PNG/GIF) 생성
+│   ├── make_visuals.py               #    혼동행렬·피처중요도 등 차트 생성
+│   ├── dashboard.py                  #    Streamlit 재생형 대시보드
 │   ├── analyze_6.py                  # 센서 한계 규명 EDA
 │   └── archive/                      # 초기 실험 20여종(GRU/LSTM/DNN/SMOTE/Optuna…)
 ├── requirements.txt
@@ -244,7 +269,7 @@ POST /predict
 - [x] 원본 풀 피처 복원 + 공식 Train/Val 분리 평가
 - [x] 절대좌표 암기 제거(일반화 개선)
 - [x] 경량 모델(2.8MB) native 직렬화 + FastAPI 서빙
-- [x] **Streamlit 실시간 관제 대시보드** — 디지털 트윈 + 진단/경고
+- [x] **Streamlit 관제 대시보드** + **FastAPI/WebSocket 실시간 스트리밍 관제**
 - [ ] **피처 중요도·혼동행렬 시각화** 이미지 README 첨부
 - [ ] **Docker 패키징** — `docker run` 한 줄 배포
 - [ ] **ONNX 변환** — 엣지/모바일/타 언어 추론 확장
