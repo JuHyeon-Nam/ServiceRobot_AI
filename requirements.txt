@@ -10,3 +10,5 @@ requests==2.34.0
 streamlit==1.58.0
 plotly==6.8.0
 streamlit-autorefresh==1.0.1
+# 시각화 생성(make_visuals.py)
+matplotlib==3.10.9
