@@ -1,0 +1,19 @@
+{
+  "n_features": 336,
+  "classes": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "best_iteration": 78,
+  "holdout_acc": 0.9594,
+  "holdout_macro_f1": 0.7222,
+  "feature_order": "flat210 + mean7 + std7 + trend7 + rfft15x7=105"
+}
