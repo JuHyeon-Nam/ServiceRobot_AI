@@ -1,30 +1,25 @@
 """
-fab_layout.py — 팹(다층) 도면·AMHS 경로의 단일 소스(서버/프론트 공유)
-- 좌표계: matplotlib식 y-up, 캔버스 232 x 150 (프론트에서 y 반전)
-- 층/장비/트랙 루프/AGV 배치를 정의하고 JSON-가능한 layout과 AGV plan을 제공.
+fab_layout.py — 대규모 팹(다층) 도면·AMHS 트랙의 단일 소스(서버/프론트/시각화 공유)
+- 좌표계: matplotlib식 y-up, 캔버스 300 x 196 (프론트에서 y 반전)
+- 층마다 베이-메시(가로 3 아일 × 세로 5 커넥터) + 장비 16대 + OHT 레일,
+  AGV는 메시 위 다양한 직각 루프를 따라 코너를 꺾으며 순환.
 """
 import numpy as np
 
-CANVAS = {"w": 232, "h": 150}
-FH = 40
-PX0, PX1 = 6, 184
-TCX = [24, 50, 76, 102, 128, 154]
+CANVAS = {"w": 300, "h": 196}
+FH = 60
+PX0, PX1 = 8, 252                       # 팹 영역 x
+VX = [16, 74, 132, 190, 248]            # 세로 메시(커넥터) x
+# 층: (y0, 약칭이름, 풀네임, 장비 약어 풀)
 FLOORS_DEF = [
-    (94, "2F · 포토 / 식각 베이", ["PHOTO", "SCANNER", "TRACK", "DRY-ETCH", "ASH", "CD-SEM"]),
-    (50, "1F · 박막 / 확산 베이", ["CVD", "PVD", "ALD", "CMP", "DIFF", "ANNEAL"]),
-    (6,  "B1 · 서브팹 / 유틸리티", ["PUMP", "SCRUBBER", "CHILLER", "GAS-BOX", "UPW", "FFU"]),
+    (128, "2F", "포토 / 식각", ["PHO", "SCN", "TRK", "ETC", "ASH", "DEV", "CMP", "CDS"]),
+    (66,  "1F", "박막 / 확산", ["CVD", "PVD", "ALD", "EPI", "DIF", "RTP", "ANN", "CLN"]),
+    (4,   "B1", "서브팹 / 유틸", ["PMP", "SCB", "CHL", "GAS", "UPW", "FFU", "N2", "EXH"]),
 ]
 
 
-def floor_geo(y0):
-    return dict(xL=15, xR=173, xM=94, yB=y0 + 7, yT=y0 + 30)
-
-
-def routes_for(y0):
-    g = floor_geo(y0); xL, xR, xM, yB, yT = g["xL"], g["xR"], g["xM"], g["yB"], g["yT"]
-    outer = [(xL, yB), (xL, yT), (xR, yT), (xR, yB), (xL, yB)]
-    fig8 = [(xL, yB), (xM, yB), (xM, yT), (xR, yT), (xR, yB), (xM, yB), (xM, yT), (xL, yT), (xL, yB)]
-    return outer, fig8
+def fgeo(y0):
+    return dict(yA=y0 + 8, yB=y0 + 26, yC=y0 + 45, y0=y0)
 
 
 class Route:
@@ -44,28 +39,62 @@ class Route:
         return float(xy[0]), float(xy[1]), ang
 
 
+def loop(x0, x1, y0, y1):
+    return [(x0, y0), (x0, y1), (x1, y1), (x1, y0), (x0, y0)]
+
+
+def _floor_tracks(g):
+    yA, yC = g["yA"], g["yC"]; yB = g["yB"]
+    h = [[VX[0], y, VX[-1], y] for y in (yA, yB, yC)]
+    v = [[vx, yA, vx, yC] for vx in VX]
+    return h + v
+
+
+def _floor_tools(g, pool):
+    yA, yB, yC = g["yA"], g["yB"], g["yC"]
+    tools, n = [], 0
+    for i in range(len(VX) - 1):                       # 4 cells
+        x0, x1 = VX[i], VX[i + 1]; cw = x1 - x0
+        for (lo, hi) in ((yA, yB), (yB, yC)):          # 2 bands
+            cy = (lo + hi) / 2; th = (hi - lo) * 0.62
+            for s in (-1, 1):                          # 2 tools/cell-band
+                cx = x0 + cw * (0.5 + s * 0.24); tw = cw * 0.40
+                n += 1
+                tools.append({"cx": round(cx, 1), "cy": round(cy, 1),
+                              "w": round(tw, 1), "h": round(th, 1),
+                              "label": f"{pool[(n-1) % len(pool)]}-{n:02d}"})
+    return tools
+
+
 def build_layout():
     floors = []
-    for y0, name, labels in FLOORS_DEF:
-        g = floor_geo(y0); xL, xR, xM, yB, yT = g["xL"], g["xR"], g["xM"], g["yB"], g["yT"]
-        tracks = [[xL, yB, xR, yB], [xL, yT, xR, yT], [xL, yB, xL, yT],
-                  [xR, yB, xR, yT], [xM, yB, xM, yT]]
-        tools = [{"cx": cx, "y": y0 + 13.5, "w": 21, "h": 11, "label": lab}
-                 for cx, lab in zip(TCX, labels)]
-        floors.append({"y0": y0, "name": name, "geo": g, "tracks": tracks, "tools": tools})
-    stocker = {"x": 188, "y": 6, "w": 22, "h": 128, "cols": 3, "rows": 11}
-    lift = {"x": 214, "y": 6, "w": 14, "h": 128,
-            "cabs": [{"y": y0 + 8, "h": 16} for y0, *_ in FLOORS_DEF]}
+    for y0, short, full, pool in FLOORS_DEF:
+        g = fgeo(y0)
+        floors.append({
+            "y0": y0, "short": short, "name": f"{short} · {full} 베이",
+            "geo": g, "tracks": _floor_tracks(g), "tools": _floor_tools(g, pool),
+            "oht": [[VX[0], g["yC"] + 6, VX[-1], g["yC"] + 6]],   # 오버헤드 OHT 레일
+        })
+    stocker = {"x": 256, "y": 6, "w": 24, "h": 184, "cols": 3, "rows": 16}
+    lift = {"x": 282, "y": 6, "w": 14, "h": 184,
+            "cabs": [{"y": y0 + 10, "h": 20} for y0, *_ in FLOORS_DEF]}
     return {"canvas": CANVAS, "floors": floors, "stocker": stocker, "lift": lift}
 
 
 def build_agv_plan(robots):
-    """층마다 5대(outer 3 + fig8 2). 반환: [{id, route(Route), phase, robot, floor}]"""
+    """층마다 9대(셀루프4 + 더블루프2x2 + 페리미터1). 코너 많은 다양한 루프."""
     plan, idx = [], 0
     for fidx, (y0, *_rest) in enumerate(FLOORS_DEF):
-        outer_pts, fig8_pts = routes_for(y0)
-        outer, fig8 = Route(outer_pts), Route(fig8_pts)
-        for route, ph in [(outer, 0.0), (outer, 0.34), (outer, 0.67), (fig8, 0.12), (fig8, 0.62)]:
+        g = fgeo(y0); yA, yC = g["yA"], g["yC"]
+        routes = []
+        for i in range(4):                              # 셀 루프 4
+            routes.append((Route(loop(VX[i], VX[i + 1], yA, yC)), 0.0))
+        routes.append((Route(loop(VX[0], VX[2], yA, yC)), 0.0))   # 더블 좌
+        routes.append((Route(loop(VX[0], VX[2], yA, yC)), 0.5))
+        routes.append((Route(loop(VX[2], VX[4], yA, yC)), 0.0))   # 더블 우
+        routes.append((Route(loop(VX[2], VX[4], yA, yC)), 0.5))
+        routes.append((Route(loop(VX[0], VX[4], yA, yC)), 0.2))   # 페리미터
+        for route, ph in routes:
             plan.append({"id": f"AGV-{idx+1:02d}", "route": route, "phase": ph,
                          "robot": robots[idx % len(robots)], "floor": fidx})
             idx += 1

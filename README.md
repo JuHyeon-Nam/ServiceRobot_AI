@@ -227,15 +227,21 @@ ServiceRobot_AI/
 python -m venv venv && source venv/Scripts/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# 추론만 할 경우 — 데이터·학습 불필요 (모델이 repo에 포함)
+# 추론·시연 — 데이터·학습 불필요 (모델·재생데이터가 repo에 포함)
 cd src
-uvicorn app:app --reload          # http://127.0.0.1:8000/docs 에서 테스트
-python evaluate_enhanced.py       # 공식 Validation 재측정 + 혼동행렬
+uvicorn realtime_server:app --reload   # ⭐ http://127.0.0.1:8000  실시간 관제 웹앱
+uvicorn app:app --reload               # REST 추론 API (/docs 에서 테스트)
+python evaluate_enhanced.py            # 공식 Validation 재측정 + 혼동행렬
+python make_floorplan.py               # 관제 PNG/GIF 재생성 (assets/)
+streamlit run dashboard.py             # Streamlit 재생형 대시보드
 
-# 처음부터 재현할 경우 — 원본 데이터셋(4.2GB) 필요
-python build_enhanced_dataset.py  # 원본 zip → enhanced_*.npz  (수 분)
-python train_enhanced.py          # 학습 → robot_pdm_enhanced.txt (약 25초, CPU)
+# 처음부터 재현 — 원본 데이터셋(4.2GB) 필요
+python build_enhanced_dataset.py       # 원본 zip → enhanced_*.npz + replay_display (수 분)
+python train_enhanced.py               # 학습 → robot_pdm_enhanced.txt (약 25초, CPU)
+python build_replay.py                 # 재생 데이터 + 예측 사전계산
 ```
+
+> 🔧 **트러블슈팅**: ① WebSocket이 안 붙으면 `pip install websockets` 확인. ② 한글이 깨지면(시각화) Windows는 맑은 고딕 기본 포함, mac/linux는 나눔고딕 설치. ③ 모델만 있으면 추론은 되지만 `build_*`/`train_*`은 원본 4.2GB가 필요.
 
 ### `/predict` 예시
 ```jsonc
@@ -248,6 +254,39 @@ POST /predict
 ```
 
 ---
+
+## 🧑‍💻 개발 가이드 · 코드 팁 (확장하는 법)
+
+> 처음 보는 사람도 바로 손댈 수 있게, "무엇을 어디서 고치는지" 정리했습니다.
+
+**파이프라인 한눈에 (데이터 → 모델 → 서비스)**
+```
+원본 zip ──build_enhanced_dataset.py──▶ enhanced_train/val.npz + replay_display.parquet
+                                            │
+                          train_enhanced.py ▼            evaluate_enhanced.py
+                          robot_pdm_enhanced.txt(2.8MB) ─────────▶ 공식 Validation 측정
+                                            │
+                    build_replay.py ▼ (예측 사전계산)
+                          replay.parquet ──┬─▶ realtime_server.py + static/index.html (라이브)
+                                           ├─▶ make_floorplan.py (PNG/GIF)
+                                           └─▶ dashboard.py (Streamlit)
+            도면/경로 단일 소스: fab_layout.py  (서버·시각화 공유)
+```
+
+**자주 하는 작업**
+| 하고 싶은 것 | 어디를 고치나 |
+|---|---|
+| 모델 재학습 | `train_enhanced.py` 실행 (피처 함수는 `MODEL_DYN_IDX`로 x,y 제외 — train/eval/app/dashboard **모두 동일해야 함**) |
+| 도면에 층·장비·AGV 추가 | `fab_layout.py`의 `FLOORS_DEF`(층·장비), `VX`(트랙 메시), `build_agv_plan()`(AGV 루프) 한 곳만 고치면 **라이브·GIF 둘 다 반영** |
+| 재생 로봇 선택/예측 | `build_replay.py` (정확도≥0.8, 에러 보유 우선으로 로봇 선별 후 예측 사전계산) |
+| 시각화 이미지 재생성 | `make_floorplan.py`(관제) / `make_visuals.py`(혼동행렬·피처중요도) |
+| 실시간 전송 주기 | `realtime_server.py`의 `asyncio.sleep` 값, 진행속도 `P["v"] += …` |
+
+**코드 팁**
+- **모델은 `native txt`로 저장**(`booster.save_model`) → 2.8MB·언어 독립·`pickle` 보안 이슈 없음. `lgb.Booster(model_file=...)`로 로드.
+- **피처 일관성이 생명**: 동적센서에서 절대좌표 x,y를 빼는 `MODEL_DYN_IDX=[0,1,4,5,6]`가 4개 파일에 동일하게 들어감. 하나라도 어긋나면 예측이 붕괴(과거 실제 디버깅 사례).
+- **재생 데이터는 학습 윈도우와 1:1 정렬**: `replay_display.parquet`을 `build_enhanced_dataset.py`가 검증셋과 같은 인덱스로 캡처 → 화면 진단 = 실제 모델 성능.
+- **좌표 정규화**: 사이트마다 좌표계가 달라, AGV는 각 트랙 구간에 자기 실제 궤적을 정규화해 배치(겹침 방지 + 코너 추종).
 
 ## 🔁 다른 환경에서 이어서 개발하기 (재현성)
 
