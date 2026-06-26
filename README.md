@@ -247,6 +247,8 @@ POST /predict
 - [ ] **Docker 패키징** — `docker run` 한 줄 배포
 - [ ] **ONNX 변환** — 엣지/모바일/타 언어 추론 확장
 
+> 📌 다음 작업 상세 가이드: **[NEXT_STEPS.md](NEXT_STEPS.md)** — 혼자 이어서 개발할 때 "뭐부터 어떻게"를 단계별로 정리
+
 ---
 
 <div align="center">
