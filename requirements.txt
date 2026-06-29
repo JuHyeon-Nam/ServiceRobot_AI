@@ -14,3 +14,6 @@ streamlit-autorefresh==1.0.1
 matplotlib==3.10.9
 # 실시간 관제 서버(realtime_server.py)
 websockets==16.0
+# 테스트(tests/) — /predict 응답·피처 차원 불변식 검증
+pytest==9.1.1
+httpx==0.28.1

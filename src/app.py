@@ -11,8 +11,20 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 import uvicorn
 
+from explain import explain_prediction
+
 DATA = "../data/processed"
-booster = lgb.Booster(model_file=f"{DATA}/robot_pdm_enhanced.txt")
+
+
+def load_booster(path: str) -> lgb.Booster:
+    """한글(비ASCII) 경로 PC에서도 안전하게 로드.
+    LightGBM의 model_file=는 비ASCII 경로 fopen이 깨질 수 있어, 파일을 파이썬에서 읽어
+    model_str로 전달한다(경로 인코딩 무관)."""
+    with open(path, "r", encoding="utf-8") as f:
+        return lgb.Booster(model_str=f.read())
+
+
+booster = load_booster(f"{DATA}/robot_pdm_enhanced.txt")
 mmeta = json.load(open(f"{DATA}/robot_pdm_enhanced_meta.json", encoding="utf-8"))
 emeta = json.load(open(f"{DATA}/enhanced_meta.json", encoding="utf-8"))
 
@@ -79,15 +91,20 @@ def predict(payload: PredictIn):
     w = payload.window
     if len(w) != 30 or any(len(r) != 7 for r in w):
         return {"error": "window는 30x7 형태여야 합니다 (시점30 x 센서7)."}
-    probs = booster.predict(make_features(w, payload.context))[0]
+    feats = make_features(w, payload.context)
+    probs = booster.predict(feats)[0]
     top = int(np.argmax(probs))
     code = NAMES[top]
     cat = "정상" if code == "정상" else CATEGORY.get(code[:5], "이상")
+    # 진단 근거(설명가능성): 어떤 물리 신호가 이 진단을 이끌었는가 Top3
+    reason = explain_prediction(booster, feats, top, n_classes=len(CLASSES),
+                                n_features=mmeta["n_features"], top_k=3)
     return {
         "error_code": code,
         "category": cat,
         "confidence": f"{probs[top]*100:.2f}%",
         "action_required": "None" if code == "정상" else "Immediate Inspection",
+        "reason": reason,
     }
 
 
