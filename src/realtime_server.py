@@ -96,5 +96,11 @@ def index():
     return FileResponse(os.path.join(STATIC, "index.html"))
 
 
+@app.get("/twin")
+def twin():
+    """3D 디지털 트윈 관제(Three.js) — 태블릿 터치 조작 + 실시간 AI 진단."""
+    return FileResponse(os.path.join(STATIC, "twin.html"))
+
+
 if os.path.isdir(STATIC):
     app.mount("/static", StaticFiles(directory=STATIC), name="static")

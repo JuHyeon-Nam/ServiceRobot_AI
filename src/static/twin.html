@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>FAB 3D 디지털 트윈 · 실시간 PdM 관제</title>
+<style>
+  :root { --ok:#22c55e; --warn:#ef4444; --bg:#0b1020; --panel:rgba(15,22,42,.82); --line:#1f2b4a; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html,body { margin:0; height:100%; overflow:hidden; background:var(--bg);
+    font-family:"맑은 고딕","Malgun Gothic",system-ui,sans-serif; color:#e8eefc; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; touch-action:none; }
+  .hud { position:fixed; pointer-events:none; }
+  #title { top:14px; left:16px; }
+  #title h1 { margin:0; font-size:17px; letter-spacing:.3px; }
+  #title p { margin:3px 0 0; font-size:12px; color:#9fb0d8; }
+  #kpi { top:14px; right:16px; display:flex; gap:8px; }
+  .chip { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:8px 12px; min-width:64px; text-align:center; backdrop-filter:blur(6px); }
+  .chip b { display:block; font-size:20px; line-height:1.1; }
+  .chip span { font-size:11px; color:#9fb0d8; }
+  #alerts { bottom:16px; left:16px; width:300px; max-height:38vh; overflow:hidden;
+    background:var(--panel); border:1px solid var(--line); border-radius:12px; backdrop-filter:blur(6px); }
+  #alerts h2 { margin:0; padding:10px 14px; font-size:13px; border-bottom:1px solid var(--line); }
+  #alertList { padding:6px 10px 10px; }
+  .alert { display:flex; justify-content:space-between; gap:8px; padding:6px 6px; font-size:12px;
+    border-bottom:1px dashed var(--line); }
+  .alert .id { color:#ffd0d0; font-weight:700; }
+  .alert .cf { color:#9fb0d8; }
+  #sel { bottom:16px; right:16px; width:280px; background:var(--panel); border:1px solid var(--line);
+    border-radius:12px; backdrop-filter:blur(6px); pointer-events:auto; display:none; }
+  #sel h2 { margin:0; padding:10px 14px; font-size:14px; border-bottom:1px solid var(--line);
+    display:flex; justify-content:space-between; align-items:center; }
+  #sel .body { padding:10px 14px; font-size:13px; }
+  #sel .row { display:flex; justify-content:space-between; padding:4px 0; }
+  #sel .row span:first-child { color:#9fb0d8; }
+  #sel .badge { font-size:12px; padding:3px 9px; border-radius:999px; font-weight:700; }
+  #sel .close { pointer-events:auto; cursor:pointer; color:#9fb0d8; font-size:18px; line-height:1; }
+  #legend { bottom:16px; left:50%; transform:translateX(-50%); display:flex; gap:14px;
+    background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:7px 16px; font-size:12px; }
+  #legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+  #hint { top:50px; left:16px; font-size:11px; color:#7f90ba; }
+  #status { top:50px; right:16px; font-size:11px; color:#7f90ba; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div class="hud" id="title">
+  <h1>🏭 FAB 3D 디지털 트윈 · 실시간 PdM 관제</h1>
+  <p>3개 층 · AGV 플릿 · AI 이상 진단 실시간 (LightGBM PdM)</p>
+</div>
+<div class="hud" id="hint">🖐 한 손가락 회전 · 두 손가락 확대/이동 · 설비 탭 → AI 진단</div>
+<div class="hud" id="status">● 연결 중…</div>
+
+<div class="hud" id="kpi">
+  <div class="chip"><b id="kTotal">–</b><span>가동</span></div>
+  <div class="chip"><b id="kOk" style="color:var(--ok)">–</b><span>정상</span></div>
+  <div class="chip"><b id="kWarn" style="color:var(--warn)">–</b><span>경고</span></div>
+</div>
+
+<div class="hud" id="legend">
+  <span><i style="background:var(--ok)"></i>정상</span>
+  <span><i style="background:var(--warn)"></i>이상 감지</span>
+  <span><i style="background:#8aa0d8"></i>설비</span>
+</div>
+
+<div class="hud" id="alerts">
+  <h2>🚨 실시간 이상 경고</h2>
+  <div id="alertList"><div class="alert"><span class="cf">대기 중…</span></div></div>
+</div>
+
+<div id="sel">
+  <h2><span id="selId">AGV</span><span class="close" onclick="document.getElementById('sel').style.display='none'">✕</span></h2>
+  <div class="body">
+    <div class="row"><span>진단</span><span id="selPred" class="badge">–</span></div>
+    <div class="row"><span>신뢰도</span><span id="selConf">–</span></div>
+    <div class="row"><span>층</span><span id="selFloor">–</span></div>
+    <div class="row"><span>상태</span><span id="selStatus">–</span></div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const FLOOR_GAP = 34;          // 층 간 높이(world)
+const S = 1.0;                 // 좌표 스케일
+const CX = 150, CZ_OFF = 26;   // 중심 보정(캔버스 300x196)
+
+const app = document.getElementById('app');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1020);
+scene.fog = new THREE.Fog(0x0b1020, 260, 620);
+
+const camera = new THREE.PerspectiveCamera(52, innerWidth/innerHeight, 0.1, 2000);
+camera.position.set(150, 150, 230);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+app.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.target.set(0, FLOOR_GAP, 0);
+controls.minDistance = 60; controls.maxDistance = 520;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+
+scene.add(new THREE.AmbientLight(0x8090c0, 0.9));
+const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+dir.position.set(120, 240, 160); scene.add(dir);
+const grid = new THREE.GridHelper(640, 32, 0x1a2647, 0x121a30);
+grid.position.y = -2; scene.add(grid);
+
+// floorY: build_agv_plan floor index 0=2F(top),1=1F,2=B1(bottom)
+const floorY = f => (2 - f) * FLOOR_GAP;
+const wx = x => (x - CX) * S;
+const wz = (y, y0) => (y - y0 - CZ_OFF) * S;
+
+const agvGroup = new THREE.Group(); scene.add(agvGroup);
+const agvMesh = {};           // id -> {mesh, target:{x,y,z,ang}}
+let LAYOUT = null, FLOOR_Y0 = {};
+
+const OK = new THREE.Color(0x22c55e), WARN = new THREE.Color(0xef4444);
+
+function buildLayout(L) {
+  LAYOUT = L;
+  L.floors.forEach((fl, fi) => {
+    FLOOR_Y0[fi] = fl.y0;
+    const ey = floorY(fi);
+    // floor slab
+    const x0 = 8, x1 = 252, zA = fl.geo.yA, zC = fl.geo.yC;
+    const w = (x1 - x0) * S, d = (zC - zA) * S;
+    const slab = new THREE.Mesh(
+      new THREE.BoxGeometry(w, 1.4, d),
+      new THREE.MeshStandardMaterial({ color:0x141d36, transparent:true, opacity:0.92, roughness:0.9 }));
+    slab.position.set(((x0+x1)/2 - CX)*S, ey, ((zA+zC)/2 - fl.y0 - CZ_OFF)*S);
+    scene.add(slab);
+    // tools (equipment)
+    fl.tools.forEach(t => {
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(t.w*S, 9, t.h*S),
+        new THREE.MeshStandardMaterial({ color:0x33406e, roughness:0.6, metalness:0.2 }));
+      m.position.set(wx(t.cx), ey + 5.4, wz(t.cy, fl.y0));
+      scene.add(m);
+      const edge = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),
+        new THREE.LineBasicMaterial({ color:0x5a6ea8 }));
+      edge.position.copy(m.position); scene.add(edge);
+    });
+    // tracks
+    fl.tracks.forEach(([ax,ay,bx,by]) => {
+      const g = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(wx(ax), ey+0.9, wz(ay, fl.y0)),
+        new THREE.Vector3(wx(bx), ey+0.9, wz(by, fl.y0))]);
+      scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color:0x2a3a66 })));
+    });
+    // floor label
+    scene.add(makeLabel(`${fl.short} · ${fl.name.split('·').pop().trim()}`,
+      ((x0)-CX)*S - 6, ey + 14, ((zA+zC)/2 - fl.y0 - CZ_OFF)*S));
+  });
+}
+
+function makeLabel(text, x, y, z) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgba(15,22,42,.85)'; g.fillRect(0,0,256,64);
+  g.fillStyle = '#cdd9f5'; g.font = 'bold 26px Malgun Gothic, sans-serif';
+  g.textBaseline = 'middle'; g.fillText(text, 12, 34);
+  const tex = new THREE.CanvasTexture(c);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true }));
+  sp.scale.set(38, 9.5, 1); sp.position.set(x, y, z);
+  return sp;
+}
+
+function agvFor(a) {
+  if (agvMesh[a.id]) return agvMesh[a.id];
+  const body = new THREE.Mesh(new THREE.ConeGeometry(3.4, 9, 5),
+    new THREE.MeshStandardMaterial({ color:OK.clone(), emissive:0x000000 }));
+  body.rotation.x = Math.PI/2;          // point along +Z, we rotate group by heading
+  const grp = new THREE.Group(); grp.add(body);
+  grp.userData = { agv:true, id:a.id };
+  agvGroup.add(grp);
+  const rec = { mesh:grp, body, target:{x:0,y:0,z:0,ang:0} };
+  agvMesh[a.id] = rec; return rec;
+}
+
+function applyState(st) {
+  document.getElementById('kTotal').textContent = st.kpi.total;
+  document.getElementById('kOk').textContent = st.kpi.ok;
+  document.getElementById('kWarn').textContent = st.kpi.warn;
+  // alerts
+  const al = document.getElementById('alertList');
+  al.innerHTML = st.alerts.length ? st.alerts.map(a =>
+    `<div class="alert"><span class="id">${a.id}</span><span>${a.label}</span>`
+    + `<span class="cf">${(a.conf*100).toFixed(0)}%</span></div>`).join('')
+    : '<div class="alert"><span class="cf">이상 없음 ✓</span></div>';
+  // agvs
+  const seen = new Set();
+  st.agvs.forEach(a => {
+    seen.add(a.id);
+    const rec = agvFor(a);
+    const y0 = FLOOR_Y0[a.floor] ?? 0;
+    rec.target = { x: wx(a.x), y: floorY(a.floor) + 6, z: wz(a.y, y0), ang: a.ang };
+    rec.data = a;
+    const col = a.status === 'warn' ? WARN : OK;
+    rec.body.material.color.copy(col);
+    rec.body.material.emissive.copy(a.status === 'warn' ? col : new THREE.Color(0x000000));
+    rec.body.material.emissiveIntensity = a.status === 'warn' ? 0.9 : 0;
+  });
+  // selected panel live update
+  if (selected && lastById[selected]) showSel(lastById[selected]);
+  lastById = Object.fromEntries(st.agvs.map(a => [a.id, a]));
+}
+
+let lastById = {}, selected = null;
+
+function showSel(a) {
+  selected = a.id;
+  const el = document.getElementById('sel'); el.style.display = 'block';
+  document.getElementById('selId').textContent = a.id;
+  const b = document.getElementById('selPred');
+  b.textContent = a.label; b.style.background = a.status==='warn' ? '#5a1d1d' : '#1d4a2c';
+  b.style.color = a.status==='warn' ? '#ffd0d0' : '#bff0cf';
+  document.getElementById('selConf').textContent = (a.conf*100).toFixed(1) + '%';
+  document.getElementById('selFloor').textContent = ['2F','1F','B1'][a.floor] ?? a.floor;
+  document.getElementById('selStatus').textContent = a.status==='warn' ? '이상 감지' : '정상';
+}
+
+// tap to select
+const ray = new THREE.Raycaster(); const ptr = new THREE.Vector2();
+function pick(cx, cy) {
+  ptr.x = (cx/innerWidth)*2 - 1; ptr.y = -(cy/innerHeight)*2 + 1;
+  ray.setFromCamera(ptr, camera);
+  const hit = ray.intersectObjects(agvGroup.children, true)[0];
+  if (hit) {
+    let g = hit.object; while (g && !g.userData?.agv) g = g.parent;
+    if (g && lastById[g.userData.id]) showSel(lastById[g.userData.id]);
+  }
+}
+let downXY = null;
+renderer.domElement.addEventListener('pointerdown', e => downXY = [e.clientX, e.clientY]);
+renderer.domElement.addEventListener('pointerup', e => {
+  if (downXY && Math.hypot(e.clientX-downXY[0], e.clientY-downXY[1]) < 6) pick(e.clientX, e.clientY);
+  downXY = null;
+});
+
+// data: WebSocket + polling fallback
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  const sEl = document.getElementById('status');
+  ws.onopen = () => sEl.textContent = '● 실시간 연결됨';
+  ws.onmessage = e => applyState(JSON.parse(e.data));
+  ws.onclose = () => { sEl.textContent = '● 재연결 시도…'; setTimeout(connect, 1500); };
+  ws.onerror = () => ws.close();
+}
+async function bootstrap() {
+  try {
+    const L = await (await fetch('/api/layout')).json(); buildLayout(L);
+    const s = await (await fetch('/api/snapshot')).json(); applyState(s);
+  } catch (err) { document.getElementById('status').textContent = '● 레이아웃 로드 실패'; }
+  connect();
+}
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+const clk = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const k = Math.min(1, clk.getDelta() * 8);   // 보간 속도
+  for (const id in agvMesh) {
+    const r = agvMesh[id], t = r.target, p = r.mesh.position;
+    p.x += (t.x - p.x) * k; p.y += (t.y - p.y) * k; p.z += (t.z - p.z) * k;
+    r.mesh.rotation.y = -t.ang * Math.PI/180;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+bootstrap(); animate();
+</script>
+</body>
+</html>
