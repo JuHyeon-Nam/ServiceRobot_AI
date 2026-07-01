@@ -19,7 +19,7 @@
 
 _3개 층 팹을 3D로 — AGV·설비를 실시간 AI 진단, 이상 발생 시 경고빔·자동 카메라 포커스_
 
-![3D 디지털 트윈 실시간 PdM 관제](assets/twin_3d.png)
+![3D 디지털 트윈 실시간 PdM 관제](assets/twin_3d.gif)
 
 <sub>▶ 실행: <code>cd src &amp;&amp; uvicorn realtime_server:app</code> → <b>http://127.0.0.1:8000/twin</b> (터치로 회전·확대, 설비 탭 → 실시간 AI 진단)</sub>
 
