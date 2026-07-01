@@ -11,11 +11,23 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.136-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![Uvicorn](https://img.shields.io/badge/Uvicorn-ASGI-499848?style=flat-square&logo=&logoColor=white)
 
-**모델 2.8MB · 추론 1ms · GPU 불필요 · CPU 단독 동작 · 실시간 관제 대시보드 포함**
+**모델 2.8MB · 추론 1ms · GPU 불필요 · CPU 단독 동작 · 태블릿 조작 3D 디지털 트윈 관제**
 
 <br>
 
-![반도체 라인 AGV 관제](assets/control_center.gif)
+### 🧊 태블릿으로 조작하는 실시간 3D 디지털 트윈 관제 (`/twin`)
+
+_3개 층 팹을 3D로 — AGV·설비를 실시간 AI 진단, 이상 발생 시 경고빔·자동 카메라 포커스_
+
+![3D 디지털 트윈 실시간 PdM 관제](assets/twin_3d.png)
+
+<sub>▶ 실행: <code>cd src &amp;&amp; uvicorn realtime_server:app</code> → <b>http://127.0.0.1:8000/twin</b> (터치로 회전·확대, 설비 탭 → 실시간 AI 진단)</sub>
+
+<br>
+
+<sub>▽ 초기 2D 관제 버전 (Canvas)</sub>
+
+![반도체 라인 AGV 관제(2D)](assets/control_center.gif)
 
 </div>
 

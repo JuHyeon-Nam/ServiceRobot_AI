@@ -46,6 +46,12 @@
     background:rgba(90,20,20,.85); color:#ffd9d9; border:1px solid #7a2a2a; border-radius:10px;
     padding:8px 14px; font-size:12px; font-weight:700; font-family:inherit; backdrop-filter:blur(6px); }
   #focusBtn:disabled { background:var(--panel); color:#6b7aa0; border-color:var(--line); cursor:default; }
+  #offline { position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:20; }
+  #offline .box { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:22px 28px;
+    text-align:center; max-width:480px; backdrop-filter:blur(6px); }
+  #offline .t { font-size:17px; font-weight:700; color:#ffd9a8; margin-bottom:10px; }
+  #offline .d { font-size:13px; color:#c3cfe8; line-height:1.6; }
+  #offline code { background:#0d1530; border:1px solid var(--line); border-radius:5px; padding:2px 7px; color:#9fd0ff; }
 </style>
 </head>
 <body>
@@ -74,6 +80,15 @@
 <div class="hud" id="alerts">
   <h2>🚨 실시간 이상 경고</h2>
   <div id="alertList"><div class="alert"><span class="cf">대기 중…</span></div></div>
+</div>
+
+<div id="offline">
+  <div class="box">
+    <div class="t">⚠ 관제 서버에 연결되지 않았습니다</div>
+    <div class="d">이 3D 트윈은 <b>실시간 서버가 데이터를 공급해야</b> 동작합니다.<br>
+      터미널에서 <code>cd src</code> 후 <code>uvicorn realtime_server:app</code> 를 실행하고<br>
+      <b>http://127.0.0.1:8000/twin</b> 으로 접속하세요.</div>
+  </div>
 </div>
 
 <div id="sel">
@@ -108,7 +123,7 @@ scene.fog = new THREE.Fog(0x0b1020, 260, 620);
 const camera = new THREE.PerspectiveCamera(52, innerWidth/innerHeight, 0.1, 2000);
 camera.position.set(150, 150, 230);
 
-const renderer = new THREE.WebGLRenderer({ antialias:true });
+const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 app.appendChild(renderer.domElement);
@@ -289,8 +304,12 @@ async function bootstrap() {
   try {
     const L = await (await fetch('/api/layout')).json(); buildLayout(L);
     const s = await (await fetch('/api/snapshot')).json(); applyState(s);
-  } catch (err) { document.getElementById('status').textContent = '● 레이아웃 로드 실패'; }
-  connect();
+    document.getElementById('offline').style.display = 'none';
+    connect();
+  } catch (err) {
+    document.getElementById('status').textContent = '● 서버 미연결';
+    document.getElementById('offline').style.display = 'flex';   // 서버 없이 열면 안내 표시
+  }
 }
 
 addEventListener('resize', () => {
