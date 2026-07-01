@@ -42,6 +42,10 @@
   #legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
   #hint { top:50px; left:16px; font-size:11px; color:#7f90ba; }
   #status { top:50px; right:16px; font-size:11px; color:#7f90ba; }
+  #focusBtn { position:fixed; top:78px; right:16px; pointer-events:auto; cursor:pointer;
+    background:rgba(90,20,20,.85); color:#ffd9d9; border:1px solid #7a2a2a; border-radius:10px;
+    padding:8px 14px; font-size:12px; font-weight:700; font-family:inherit; backdrop-filter:blur(6px); }
+  #focusBtn:disabled { background:var(--panel); color:#6b7aa0; border-color:var(--line); cursor:default; }
 </style>
 </head>
 <body>
@@ -53,6 +57,7 @@
 </div>
 <div class="hud" id="hint">🖐 한 손가락 회전 · 두 손가락 확대/이동 · 설비 탭 → AI 진단</div>
 <div class="hud" id="status">● 연결 중…</div>
+<button id="focusBtn" disabled>🎯 경고 없음</button>
 
 <div class="hud" id="kpi">
   <div class="chip"><b id="kTotal">–</b><span>가동</span></div>
@@ -187,10 +192,16 @@ function agvFor(a) {
   const body = new THREE.Mesh(new THREE.ConeGeometry(3.4, 9, 5),
     new THREE.MeshStandardMaterial({ color:OK.clone(), emissive:0x000000 }));
   body.rotation.x = Math.PI/2;          // point along +Z, we rotate group by heading
-  const grp = new THREE.Group(); grp.add(body);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(6.5, 0.7, 8, 28),
+    new THREE.MeshBasicMaterial({ color:0xff3b3b, transparent:true, opacity:0.9 }));
+  ring.rotation.x = Math.PI/2; ring.position.y = -4.5; ring.visible = false;
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 70, 8),
+    new THREE.MeshBasicMaterial({ color:0xff5a5a, transparent:true, opacity:0.26 }));
+  beam.position.y = 33; beam.visible = false;
+  const grp = new THREE.Group(); grp.add(body); grp.add(ring); grp.add(beam);
   grp.userData = { agv:true, id:a.id };
   agvGroup.add(grp);
-  const rec = { mesh:grp, body, target:{x:0,y:0,z:0,ang:0} };
+  const rec = { mesh:grp, body, ring, beam, target:{x:0,y:0,z:0,ang:0} };
   agvMesh[a.id] = rec; return rec;
 }
 
@@ -212,17 +223,27 @@ function applyState(st) {
     const y0 = FLOOR_Y0[a.floor] ?? 0;
     rec.target = { x: wx(a.x), y: floorY(a.floor) + 6, z: wz(a.y, y0), ang: a.ang };
     rec.data = a;
-    const col = a.status === 'warn' ? WARN : OK;
+    const warn = a.status === 'warn';
+    const col = warn ? WARN : OK;
     rec.body.material.color.copy(col);
-    rec.body.material.emissive.copy(a.status === 'warn' ? col : new THREE.Color(0x000000));
-    rec.body.material.emissiveIntensity = a.status === 'warn' ? 0.9 : 0;
+    rec.body.material.emissive.copy(warn ? col : new THREE.Color(0x000000));
+    rec.body.material.emissiveIntensity = warn ? 0.9 : 0;
+    rec.ring.visible = warn; rec.beam.visible = warn;
   });
+  // 최우선 경고(최고 신뢰도) 추적 → 자동 포커스 버튼
+  worst = st.alerts.slice().sort((x, y) => y.conf - x.conf)[0] || null;
+  const fb = document.getElementById('focusBtn');
+  fb.disabled = !worst;
+  fb.textContent = worst ? `🎯 최우선 경고 ${worst.id} (${(worst.conf*100).toFixed(0)}%)` : '🎯 경고 없음 · 전체 정상';
   // selected panel live update
   if (selected && lastById[selected]) showSel(lastById[selected]);
   lastById = Object.fromEntries(st.agvs.map(a => [a.id, a]));
 }
 
-let lastById = {}, selected = null;
+let lastById = {}, selected = null, worst = null, focus = null;
+document.getElementById('focusBtn').onclick = () => {
+  if (worst && agvMesh[worst.id]) focus = agvMesh[worst.id];
+};
 
 function showSel(a) {
   selected = a.id;
@@ -278,13 +299,28 @@ addEventListener('resize', () => {
 });
 
 const clk = new THREE.Clock();
+let T = 0;
 function animate() {
   requestAnimationFrame(animate);
-  const k = Math.min(1, clk.getDelta() * 8);   // 보간 속도
+  const dt = clk.getDelta(); T += dt;
+  const k = Math.min(1, dt * 8);                 // 보간 속도
+  const pulse = 0.5 + 0.5 * Math.sin(T * 6);     // 경고 맥동(0~1)
   for (const id in agvMesh) {
     const r = agvMesh[id], t = r.target, p = r.mesh.position;
     p.x += (t.x - p.x) * k; p.y += (t.y - p.y) * k; p.z += (t.z - p.z) * k;
     r.mesh.rotation.y = -t.ang * Math.PI/180;
+    if (r.ring.visible) {                          // 이상 설비 하이라이트 맥동
+      r.ring.scale.setScalar(1 + pulse * 0.5);
+      r.ring.material.opacity = 0.35 + pulse * 0.6;
+      r.body.material.emissiveIntensity = 0.5 + pulse * 0.9;
+    }
+  }
+  if (focus) {                                     // 최우선 경고로 카메라 자동 이동
+    const fp = focus.mesh.position;
+    controls.target.lerp(fp, 0.06);
+    const want = new THREE.Vector3(fp.x + 42, fp.y + 58, fp.z + 72);
+    camera.position.lerp(want, 0.06);
+    if (camera.position.distanceTo(want) < 3) focus = null;
   }
   controls.update();
   renderer.render(scene, camera);
