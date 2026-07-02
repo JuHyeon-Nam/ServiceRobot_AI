@@ -17,7 +17,7 @@
 
 ### 🧊 태블릿으로 조작하는 실시간 3D 디지털 트윈 관제 (`/twin`)
 
-_3개 층 팹을 3D로 — AGV·설비를 실시간 AI 진단, 이상 발생 시 경고빔·자동 카메라 포커스_
+_3개 층 팹을 3D로 — AGV·설비를 실시간 AI 진단, 이상 발생 시 경고빔·자동 카메라 포커스, 설비 탭 → 실시간 센서 그래프(진동·배터리·온도) + AI 판단 근거_
 
 ![3D 디지털 트윈 실시간 PdM 관제](assets/twin_3d.gif)
 
@@ -322,7 +322,7 @@ POST /predict
 - [x] 경량 모델(2.8MB) native 직렬화 + FastAPI 서빙
 - [x] **Streamlit 관제 대시보드** + **FastAPI/WebSocket 실시간 스트리밍 관제**
 - [x] **설명가능성(Explainability)** — `/predict`가 진단 근거(물리 신호 Top3) 반환, LightGBM 내장 SHAP로 경량 유지 + pytest
-- [x] **3D 디지털 트윈** — `/twin`(Three.js): 3개 층·장비·AGV를 3D로, 태블릿 터치 조작 + 탭→실시간 AI 진단 (`uvicorn realtime_server:app` → http://127.0.0.1:8000/twin )
+- [x] **3D 디지털 트윈** — `/twin`(Three.js): 3개 층·장비·AGV를 3D로, 태블릿 터치 조작 + 탭→실시간 AI 진단, **설비 탭 시 실시간 센서 그래프(진동·배터리·온도) + AI 판단 근거** (`uvicorn realtime_server:app` → http://127.0.0.1:8000/twin )
 - [ ] **피처 중요도·혼동행렬 시각화** 이미지 README 첨부
 - [ ] **Docker 패키징** — `docker run` 한 줄 배포
 - [ ] **ONNX 변환** — 엣지/모바일/타 언어 추론 확장

@@ -47,3 +47,22 @@ def test_snapshot_contract(client):
     for key in ("id", "x", "y", "ang", "floor", "status", "pred", "label", "conf"):
         assert key in a, f"AGV 응답에 {key} 누락 (3D 렌더가 의존)"
     assert a["status"] in ("ok", "warn")
+
+
+def test_agv_sensor_contract(client):
+    """A4: 설비 탭 패널의 실시간 센서 그래프·AI 근거가 의존하는 계약."""
+    s = client.get("/api/snapshot").json()
+    a = s["agvs"][0]
+    assert {"vib", "batt", "temp"} <= a["sensors"].keys(), "센서 텔레메트리 키 누락"
+    for k in ("vib", "batt", "temp"):
+        assert isinstance(a["sensors"][k], (int, float))
+    assert 0 <= a["sensors"]["batt"] <= 100
+    assert isinstance(a["cause"], list) and a["cause"], "AI 판단 근거(cause) 비면 안 됨"
+
+
+def test_sensors_couple_to_fault(client):
+    """진단(pred)에 센서가 물리적으로 커플링되는지: 배터리 저하→저배터리, 센서 이상→고진동."""
+    from realtime_server import agv_sensors
+    assert agv_sensors(10, 200, "E-RBT-B")["batt"] < 35, "배터리 저하인데 배터리 정상 수준"
+    assert agv_sensors(10, 200, "E-RBT-S")["vib"] > 5, "센서 이상인데 진동 낮음"
+    assert agv_sensors(10, 200, "정상")["batt"] > 35, "정상인데 배터리 저수준"

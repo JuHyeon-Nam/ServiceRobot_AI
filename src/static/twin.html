@@ -37,6 +37,15 @@
   #sel .row span:first-child { color:#9fb0d8; }
   #sel .badge { font-size:12px; padding:3px 9px; border-radius:999px; font-weight:700; }
   #sel .close { pointer-events:auto; cursor:pointer; color:#9fb0d8; font-size:18px; line-height:1; }
+  #sel .sens { margin-top:9px; border-top:1px solid var(--line); padding-top:8px; }
+  #sel .sg { margin-bottom:7px; }
+  #sel .sg label { display:flex; justify-content:space-between; font-size:11px; color:#9fb0d8; margin-bottom:3px; }
+  #sel .sg label em { font-style:normal; font-weight:700; color:#e8eefc; }
+  #sel .sg canvas { width:100%; height:34px; display:block; background:#0c1330;
+    border:1px solid var(--line); border-radius:6px; }
+  #sel .cause { margin-top:9px; border-top:1px solid var(--line); padding-top:8px; }
+  #sel .cause .ct { font-size:11px; color:#9fb0d8; margin-bottom:5px; }
+  #sel .cause ul { margin:0; padding-left:16px; font-size:12px; line-height:1.6; color:#dfe7fb; }
   #legend { bottom:16px; left:50%; transform:translateX(-50%); display:flex; gap:14px;
     background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:7px 16px; font-size:12px; }
   #legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
@@ -98,6 +107,15 @@
     <div class="row"><span>신뢰도</span><span id="selConf">–</span></div>
     <div class="row"><span>층</span><span id="selFloor">–</span></div>
     <div class="row"><span>상태</span><span id="selStatus">–</span></div>
+    <div class="sens">
+      <div class="sg"><label>진동 <em id="svVib">–</em> mm/s</label><canvas id="cVib" width="240" height="34"></canvas></div>
+      <div class="sg"><label>배터리 <em id="svBatt">–</em> %</label><canvas id="cBatt" width="240" height="34"></canvas></div>
+      <div class="sg"><label>온도 <em id="svTemp">–</em> °C</label><canvas id="cTemp" width="240" height="34"></canvas></div>
+    </div>
+    <div class="cause">
+      <div class="ct">🧠 AI 판단 근거 · 주요 이상 신호</div>
+      <ul id="causeList"><li>–</li></ul>
+    </div>
   </div>
 </div>
 
@@ -290,9 +308,9 @@ function applyState(st) {
   const fb = document.getElementById('focusBtn');
   fb.disabled = !worst;
   fb.textContent = worst ? `🎯 최우선 경고 ${worst.id} (${(worst.conf*100).toFixed(0)}%)` : '🎯 경고 없음 · 전체 정상';
-  // selected panel live update
-  if (selected && lastById[selected]) showSel(lastById[selected]);
+  // selected panel live update (최신 스냅샷 반영 후 갱신 → 센서 버퍼가 현재값 누적)
   lastById = Object.fromEntries(st.agvs.map(a => [a.id, a]));
+  if (selected && lastById[selected]) showSel(lastById[selected]);
 }
 
 let lastById = {}, selected = null, worst = null, focus = null;
@@ -300,7 +318,26 @@ document.getElementById('focusBtn').onclick = () => {
   if (worst && agvMesh[worst.id]) focus = agvMesh[worst.id];
 };
 
+const SBUF_MAX = 48;                     // 스파크라인 표시 표본 수(≈5초 창)
+let sbuf = { vib: [], batt: [], temp: [] }, sensId = null;
+
+function drawSpark(id, arr, color, lo, hi) {
+  const c = document.getElementById(id), g = c.getContext('2d');
+  const W = c.width, H = c.height; g.clearRect(0, 0, W, H);
+  if (arr.length < 2) return;
+  const n = arr.length, span = Math.max(hi - lo, 1e-6);
+  const yOf = v => H - ((Math.max(lo, Math.min(hi, v)) - lo) / span) * (H - 6) - 3;
+  g.beginPath();
+  arr.forEach((v, k) => { const x = k / (n - 1) * W, y = yOf(v); k ? g.lineTo(x, y) : g.moveTo(x, y); });
+  g.lineTo(W, H); g.lineTo(0, H); g.closePath();
+  g.globalAlpha = 0.13; g.fillStyle = color; g.fill(); g.globalAlpha = 1;
+  g.beginPath();
+  arr.forEach((v, k) => { const x = k / (n - 1) * W, y = yOf(v); k ? g.lineTo(x, y) : g.moveTo(x, y); });
+  g.lineWidth = 1.7; g.strokeStyle = color; g.stroke();
+}
+
 function showSel(a) {
+  if (a.id !== sensId) { sbuf = { vib: [], batt: [], temp: [] }; sensId = a.id; }  // 선택 바뀌면 버퍼 리셋
   selected = a.id;
   const el = document.getElementById('sel'); el.style.display = 'block';
   document.getElementById('selId').textContent = a.id;
@@ -310,6 +347,20 @@ function showSel(a) {
   document.getElementById('selConf').textContent = (a.conf*100).toFixed(1) + '%';
   document.getElementById('selFloor').textContent = ['2F','1F','B1'][a.floor] ?? a.floor;
   document.getElementById('selStatus').textContent = a.status==='warn' ? '이상 감지' : '정상';
+  // 실시간 센서 그래프(진동·배터리·온도)
+  const s = a.sensors;
+  if (s) {
+    for (const k of ['vib', 'batt', 'temp']) { sbuf[k].push(s[k]); if (sbuf[k].length > SBUF_MAX) sbuf[k].shift(); }
+    const vibHot = s.vib > 5, battHot = s.batt < 25, tempHot = s.temp > 58;
+    const setNum = (id, val, hot) => { const e = document.getElementById(id); e.textContent = val; e.style.color = hot ? '#ff8a8a' : '#e8eefc'; };
+    setNum('svVib', s.vib.toFixed(1), vibHot); setNum('svBatt', s.batt.toFixed(0), battHot); setNum('svTemp', s.temp.toFixed(0), tempHot);
+    drawSpark('cVib', sbuf.vib, vibHot ? '#ef4444' : '#22c55e', 0, 12);
+    drawSpark('cBatt', sbuf.batt, battHot ? '#ef4444' : '#38bdf8', 0, 100);
+    drawSpark('cTemp', sbuf.temp, tempHot ? '#ef4444' : '#f59e0b', 25, 75);
+  }
+  // AI 판단 근거(주요 이상 신호)
+  const cl = document.getElementById('causeList');
+  cl.innerHTML = (a.cause || ['–']).map(c => `<li>${c}</li>`).join('');
 }
 
 // tap to select
