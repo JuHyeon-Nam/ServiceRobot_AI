@@ -184,10 +184,50 @@ function buildLayout(L) {
         new THREE.Vector3(wx(bx), ey+0.9, wz(by, fl.y0))]);
       scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color:0x2a3a66 })));
     });
+    // OHT 오버헤드 레일(천장 반송)
+    (fl.oht || []).forEach(([ax, ay, bx, by]) => {
+      const oy = ey + 11;
+      const g = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(wx(ax), oy, wz(ay, fl.y0)),
+        new THREE.Vector3(wx(bx), oy, wz(by, fl.y0))]);
+      scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color:0x4a6098 })));
+    });
     // floor label
     scene.add(makeLabel(`${fl.short} · ${fl.name.split('·').pop().trim()}`,
       ((x0)-CX)*S - 6, ey + 14, ((zA+zC)/2 - fl.y0 - CZ_OFF)*S));
   });
+
+  // ===== 스토커 타워 + 층간 리프트 (전 층 관통 구조물) =====
+  const yBot = floorY(2) - 3, yTop = floorY(0) + 16, TH = yTop - yBot, ymid = (yBot + yTop) / 2;
+  function pillar(cx, cz, w, d, color, op, label) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, TH, d),
+      new THREE.MeshStandardMaterial({ color, transparent: true, opacity: op, roughness: 0.75 }));
+    m.position.set(cx, ymid, cz); scene.add(m);
+    const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),
+      new THREE.LineBasicMaterial({ color: 0x5a6ea8 }));
+    e.position.copy(m.position); scene.add(e);
+    if (label) scene.add(makeLabel(label, cx - 3.5, yTop + 5, cz));
+    return m;
+  }
+  if (LAYOUT.stocker) {
+    const S2 = LAYOUT.stocker, cx = wx(S2.x + S2.w / 2);
+    pillar(cx, 0, 9, 26, 0x2a3557, 0.92, '스토커');
+    for (let k = 1; k < 6; k++) {           // 선반 층 라인
+      const yy = yBot + TH * k / 6;
+      const g = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(cx - 4.5, yy, -13), new THREE.Vector3(cx - 4.5, yy, 13)]);
+      scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x46587f })));
+    }
+  }
+  if (LAYOUT.lift) {
+    const lx = wx(LAYOUT.lift.x + LAYOUT.lift.w / 2);
+    pillar(lx, 0, 5, 20, 0x24304e, 0.5, '층간 리프트');
+    L.floors.forEach((fl, fi) => {          // 층별 리프트 캐빈
+      const cab = new THREE.Mesh(new THREE.BoxGeometry(4, 5, 8),
+        new THREE.MeshStandardMaterial({ color: 0x3f7fb0, emissive: 0x143a52, emissiveIntensity: 0.6 }));
+      cab.position.set(lx, floorY(fi) + 5, 0); scene.add(cab);
+    });
+  }
 }
 
 function makeLabel(text, x, y, z) {
