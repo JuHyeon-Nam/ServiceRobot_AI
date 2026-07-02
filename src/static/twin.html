@@ -28,6 +28,10 @@
     border-bottom:1px dashed var(--line); }
   .alert .id { color:#ffd0d0; font-weight:700; }
   .alert .cf { color:#9fb0d8; }
+  .lv { font-size:10px; font-weight:700; padding:1px 6px; border-radius:8px; white-space:nowrap; }
+  .lv-위험 { background:#ff3b3b; color:#fff; }
+  .lv-경고 { background:#ff9f1a; color:#231400; }
+  .lv-주의 { background:#ffe14d; color:#2a2400; }
   #sel { bottom:16px; right:16px; width:280px; background:var(--panel); border:1px solid var(--line);
     border-radius:12px; backdrop-filter:blur(6px); pointer-events:auto; display:none; }
   #sel h2 { margin:0; padding:10px 14px; font-size:14px; border-bottom:1px solid var(--line);
@@ -312,8 +316,9 @@ function applyState(st) {
   document.getElementById('kWarn').textContent = st.kpi.warn;
   // alerts
   const al = document.getElementById('alertList');
-  al.innerHTML = st.alerts.length ? st.alerts.map(a =>
-    `<div class="alert"><span class="id">${a.id}</span><span>${a.label}</span>`
+  al.innerHTML = st.alerts.length ? st.alerts.slice().sort((x, y) => y.conf - x.conf).map(a =>
+    `<div class="alert"><span class="id">${a.id}</span>`
+    + `<span class="lv lv-${a.level}">${a.level || ''}</span><span>${a.label}</span>`
     + `<span class="cf">${(a.conf*100).toFixed(0)}%</span></div>`).join('')
     : '<div class="alert"><span class="cf">이상 없음 ✓</span></div>';
   // agvs

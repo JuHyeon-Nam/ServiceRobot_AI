@@ -37,6 +37,19 @@ CAUSE = {
     "정상": ["모든 신호 정상 범위"],
 }
 
+# 경고 등급(주의/경고/위험) — 진단 신뢰도(conf) 기준의 3단계 트리아지.
+# 관제 화면에서 다수 경고를 한눈에 우선순위화(색·집계)하기 위한 계약값.
+LEVELS = ("주의", "경고", "위험")
+
+
+def alert_level(conf: float) -> str:
+    """진단 신뢰도를 3단계 경고 등급으로 매핑. 높을수록 확실한 이상 → 우선 대응."""
+    if conf >= 0.85:
+        return "위험"
+    if conf >= 0.60:
+        return "경고"
+    return "주의"
+
 
 def agv_sensors(i: int, n: int, pred: str) -> dict:
     """AGV 실시간 텔레메트리(진동·배터리·온도)를 결정론적으로 산출.
@@ -86,16 +99,21 @@ def snapshot():
         x, y, ang = a["route"].at(s)
         pred = t["pred"][i]; warn = pred != "정상"
         per[a["floor"]] += int(warn)
+        conf = round(float(t["conf"][i]), 3)
+        level = alert_level(conf) if warn else None
         item = {"id": a["id"], "x": round(x, 2), "y": round(y, 2), "ang": round(ang, 1),
                 "floor": a["floor"], "status": "warn" if warn else "ok",
-                "pred": pred, "label": KOR.get(pred, pred), "conf": round(float(t["conf"][i]), 3),
+                "pred": pred, "label": KOR.get(pred, pred), "conf": conf, "level": level,
                 "sensors": agv_sensors(i, n, pred), "cause": CAUSE.get(pred, CAUSE["정상"])}
         agvs.append(item)
         if warn:
-            alerts.append({"id": a["id"], "label": item["label"], "conf": item["conf"], "floor": a["floor"]})
+            alerts.append({"id": a["id"], "label": item["label"], "conf": conf,
+                           "floor": a["floor"], "level": level})
     w = sum(per)
+    by_level = {L: sum(al["level"] == L for al in alerts) for L in LEVELS}
     return {"type": "state", "p": round(p, 4), "agvs": agvs,
-            "kpi": {"total": len(PLAN), "ok": len(PLAN) - w, "warn": w, "per_floor": per},
+            "kpi": {"total": len(PLAN), "ok": len(PLAN) - w, "warn": w,
+                    "per_floor": per, "by_level": by_level},
             "alerts": alerts}
 
 

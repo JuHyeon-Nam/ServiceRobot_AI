@@ -66,3 +66,30 @@ def test_sensors_couple_to_fault(client):
     assert agv_sensors(10, 200, "E-RBT-B")["batt"] < 35, "배터리 저하인데 배터리 정상 수준"
     assert agv_sensors(10, 200, "E-RBT-S")["vib"] > 5, "센서 이상인데 진동 낮음"
     assert agv_sensors(10, 200, "정상")["batt"] > 35, "정상인데 배터리 저수준"
+
+
+def test_alert_level_thresholds():
+    """B2: 신뢰도(conf) → 경고 등급(주의/경고/위험) 트리아지 경계값."""
+    from realtime_server import alert_level
+    assert alert_level(0.95) == "위험"
+    assert alert_level(0.85) == "위험"          # 경계 포함
+    assert alert_level(0.70) == "경고"
+    assert alert_level(0.60) == "경고"          # 경계 포함
+    assert alert_level(0.40) == "주의"
+
+
+def test_snapshot_level_contract(client):
+    """B2: 관제 UI가 의존하는 경고 등급 계약 — AGV·alert·KPI 집계."""
+    from realtime_server import LEVELS
+    s = client.get("/api/snapshot").json()
+    # 경고 상태 AGV는 등급을 갖고, 정상 AGV는 등급이 없다(None).
+    for a in s["agvs"]:
+        if a["status"] == "warn":
+            assert a["level"] in LEVELS, f"경고 AGV에 등급 누락: {a['id']}"
+        else:
+            assert a["level"] is None
+    for al in s["alerts"]:
+        assert al["level"] in LEVELS
+    by = s["kpi"]["by_level"]
+    assert set(by.keys()) == set(LEVELS)
+    assert sum(by.values()) == s["kpi"]["warn"], "등급별 합계가 총 경고 수와 불일치"
