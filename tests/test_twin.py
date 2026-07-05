@@ -93,3 +93,17 @@ def test_snapshot_level_contract(client):
     by = s["kpi"]["by_level"]
     assert set(by.keys()) == set(LEVELS)
     assert sum(by.values()) == s["kpi"]["warn"], "등급별 합계가 총 경고 수와 불일치"
+
+
+def test_offline_vendored_three(client):
+    """A6: 전시장 인터넷 없이도 구동 — Three.js가 로컬 벤더링되어 /static에서 서빙되는지.
+    import map이 CDN이 아니라 로컬 경로를 가리키고, 실제 파일이 200으로 서빙되어야 한다."""
+    twin = client.get("/twin").text
+    assert "unpkg.com" not in twin and "cdn" not in twin.lower(), "외부 CDN 참조가 남아 있음"
+    assert "/static/vendor/three/build/three.module.js" in twin, "로컬 three import map 누락"
+    # 실제 벤더 파일이 서빙되고 자바스크립트 모듈로 유효해야 함(에러 페이지가 아님).
+    for path in ("/static/vendor/three/build/three.module.js",
+                 "/static/vendor/three/examples/jsm/controls/OrbitControls.js"):
+        r = client.get(path)
+        assert r.status_code == 200, f"{path} 서빙 실패"
+        assert "from 'three'" in r.text or "REVISION" in r.text

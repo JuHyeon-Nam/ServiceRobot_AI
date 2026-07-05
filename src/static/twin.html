@@ -149,10 +149,11 @@
   </div>
 </div>
 
+<!-- 오프라인 벤더링(A6): 전시장 인터넷 없이도 구동. Three.js를 /static/vendor에 로컬 동봉. -->
 <script type="importmap">
 { "imports": {
-  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  "three": "/static/vendor/three/build/three.module.js",
+  "three/addons/": "/static/vendor/three/examples/jsm/"
 }}
 </script>
 <script type="module">
