@@ -1,5 +1,6 @@
 numpy==2.4.4
 pandas==3.0.2
+pyarrow==24.0.0            # pandas의 parquet 엔진(replay.parquet 읽기)
 scikit-learn==1.8.0
 lightgbm==4.6.0
 fastapi==0.136.1
