@@ -51,6 +51,15 @@ def alert_level(conf: float) -> str:
     return "주의"
 
 
+TREND_W = 12                                  # B3: 이력 타임라인 길이(최근 N틱)
+_LVL_CODE = {"주의": 1, "경고": 2, "위험": 3}
+
+
+def diag_code(pred: str, conf: float) -> int:
+    """진단을 0~3 코드로. 0 정상 · 1 주의 · 2 경고 · 3 위험 (타임라인 셀 색상 기준)."""
+    return 0 if pred == "정상" else _LVL_CODE[alert_level(conf)]
+
+
 def agv_sensors(i: int, n: int, pred: str) -> dict:
     """AGV 실시간 텔레메트리(진동·배터리·온도)를 결정론적으로 산출.
     replay 인덱스(i)에 위상을 고정해 재현 가능하고, 진단(pred)에 물리적으로 커플링한다.
@@ -101,10 +110,13 @@ def snapshot():
         per[a["floor"]] += int(warn)
         conf = round(float(t["conf"][i]), 3)
         level = alert_level(conf) if warn else None
+        lo = max(0, i - (TREND_W - 1))         # B3: 최근 N틱 진단 추세(0~3 코드)
+        trend = [diag_code(t["pred"][k], round(float(t["conf"][k]), 3)) for k in range(lo, i + 1)]
         item = {"id": a["id"], "x": round(x, 2), "y": round(y, 2), "ang": round(ang, 1),
                 "floor": a["floor"], "status": "warn" if warn else "ok",
                 "pred": pred, "label": KOR.get(pred, pred), "conf": conf, "level": level,
-                "sensors": agv_sensors(i, n, pred), "cause": CAUSE.get(pred, CAUSE["정상"])}
+                "sensors": agv_sensors(i, n, pred), "cause": CAUSE.get(pred, CAUSE["정상"]),
+                "trend": trend}
         agvs.append(item)
         if warn:
             alerts.append({"id": a["id"], "label": item["label"], "conf": conf,

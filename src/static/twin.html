@@ -50,6 +50,13 @@
   #sel .cause { margin-top:9px; border-top:1px solid var(--line); padding-top:8px; }
   #sel .cause .ct { font-size:11px; color:#9fb0d8; margin-bottom:5px; }
   #sel .cause ul { margin:0; padding-left:16px; font-size:12px; line-height:1.6; color:#dfe7fb; }
+  #sel .trend { margin-top:9px; border-top:1px solid var(--line); padding-top:8px; }
+  #sel .trend .tt { font-size:11px; color:#9fb0d8; margin-bottom:5px; }
+  #sel .trend .tt span { color:#e8eefc; font-weight:700; }
+  #sel .trow { display:flex; gap:2px; height:14px; }
+  #sel .trow i { flex:1; border-radius:2px; background:#22c55e; }
+  #sel .tleg { display:flex; gap:10px; margin-top:5px; font-size:10px; color:#9fb0d8; }
+  #sel .tleg i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:3px; vertical-align:middle; }
   #legend { bottom:16px; left:50%; transform:translateX(-50%); display:flex; gap:14px;
     background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:7px 16px; font-size:12px; }
   #legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
@@ -145,6 +152,11 @@
     <div class="cause">
       <div class="ct">🧠 AI 판단 근거 · 주요 이상 신호</div>
       <ul id="causeList"><li>–</li></ul>
+    </div>
+    <div class="trend">
+      <div class="tt">📈 진단 추세 · 최근 이력 <span id="trendNow"></span></div>
+      <div class="trow" id="trendRow"></div>
+      <div class="tleg"><span><i style="background:#22c55e"></i>정상</span><span><i style="background:#facc15"></i>주의</span><span><i style="background:#fb923c"></i>경고</span><span><i style="background:#ef4444"></i>위험</span></div>
     </div>
   </div>
 </div>
@@ -407,6 +419,14 @@ function showSel(a) {
   // AI 판단 근거(주요 이상 신호)
   const cl = document.getElementById('causeList');
   cl.innerHTML = (a.cause || ['–']).map(c => `<li>${c}</li>`).join('');
+  // 진단 추세 타임라인(최근 이력): 0 정상·1 주의·2 경고·3 위험
+  const TC = ['#22c55e', '#facc15', '#fb923c', '#ef4444'];
+  const tr = a.trend || [];
+  document.getElementById('trendRow').innerHTML =
+    tr.map(c => `<i style="background:${TC[c] || '#22c55e'}"></i>`).join('');
+  const warnN = tr.filter(c => c > 0).length;
+  document.getElementById('trendNow').textContent =
+    tr.length ? `(최근 ${tr.length}틱 중 이상 ${warnN})` : '';
 }
 
 // tap to select

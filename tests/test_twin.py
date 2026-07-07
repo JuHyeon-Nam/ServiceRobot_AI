@@ -107,3 +107,18 @@ def test_offline_vendored_three(client):
         r = client.get(path)
         assert r.status_code == 200, f"{path} 서빙 실패"
         assert "from 'three'" in r.text or "REVISION" in r.text
+
+
+def test_trend_history_contract(client):
+    """B3: 설비 탭 타임라인이 의존하는 진단 추세(최근 N틱, 0~3 코드) 계약."""
+    from realtime_server import TREND_W, diag_code
+    s = client.get("/api/snapshot").json()
+    a = s["agvs"][0]
+    assert isinstance(a["trend"], list) and a["trend"], "진단 추세 이력이 비면 안 됨"
+    assert len(a["trend"]) <= TREND_W
+    assert all(isinstance(c, int) and 0 <= c <= 3 for c in a["trend"]), "추세 코드는 0~3"
+    # 현재 상태와 마지막 추세 코드 정합: 정상이면 0, 이상이면 >0
+    assert (a["trend"][-1] == 0) == (a["status"] == "ok")
+    # diag_code 매핑: 정상=0, 위험(고신뢰)=3
+    assert diag_code("정상", 0.99) == 0
+    assert diag_code("E-RBT-B", 0.99) == 3
