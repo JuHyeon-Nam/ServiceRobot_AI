@@ -122,7 +122,8 @@ P = {"v": 0.0}     # 전역 진행도(0~1 순환)
 def snapshot():
     p = P["v"]; agvs = []; per = [0, 0, 0]; alerts = []
     for a in PLAN:
-        t = TRAJ[a["robot"]]; n = t["n"]; i = int(p * (n - 1))
+        t = TRAJ[a["robot"]]; n = t["n"]
+        i = int(((p + a.get("toff", 0.0)) % 1.0) * (n - 1))    # AGV별 시점 오프셋 → 고장 분산
         s = (t["prog"][i] + a["phase"]) % 1.0
         x, y, ang = a["route"].at(s)
         pred = t["pred"][i]; warn = pred != "정상"

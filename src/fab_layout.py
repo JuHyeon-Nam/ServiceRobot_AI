@@ -95,7 +95,9 @@ def build_agv_plan(robots):
         routes.append((Route(loop(VX[2], VX[4], yA, yC)), 0.5))
         routes.append((Route(loop(VX[0], VX[4], yA, yC)), 0.2))   # 페리미터
         for route, ph in routes:
+            # toff: AGV마다 재생 타임라인 오프셋(황금비 분산) → 고장이 한꺼번에 몰리지 않고 현실적으로 흩어짐
             plan.append({"id": f"AGV-{idx+1:02d}", "route": route, "phase": ph,
-                         "robot": robots[idx % len(robots)], "floor": fidx})
+                         "robot": robots[idx % len(robots)], "floor": fidx,
+                         "toff": round((idx * 0.61803398875) % 1.0, 4)})
             idx += 1
     return plan

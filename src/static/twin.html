@@ -118,8 +118,10 @@
 </div>
 
 <div class="hud" id="legend">
-  <span><i style="background:var(--ok)"></i>정상</span>
-  <span><i style="background:var(--warn)"></i>이상 감지</span>
+  <span><i style="background:#22c55e"></i>정상</span>
+  <span><i style="background:#facc15"></i>주의</span>
+  <span><i style="background:#fb923c"></i>경고</span>
+  <span><i style="background:#ef4444"></i>위험</span>
   <span><i style="background:#8aa0d8"></i>설비</span>
 </div>
 
@@ -199,9 +201,12 @@ controls.minDistance = 60; controls.maxDistance = 520;
 controls.maxPolarAngle = Math.PI * 0.49;
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
 
-scene.add(new THREE.AmbientLight(0x8090c0, 0.9));
-const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+scene.add(new THREE.AmbientLight(0x8090c0, 0.55));
+scene.add(new THREE.HemisphereLight(0xbcd0ff, 0x0b1020, 0.7));   // 하늘/바닥 소프트 조명
+const dir = new THREE.DirectionalLight(0xffffff, 0.95);
 dir.position.set(120, 240, 160); scene.add(dir);
+const fill = new THREE.DirectionalLight(0x6f8bd6, 0.35);          // 반대편 필 라이트(입체감)
+fill.position.set(-140, 90, -120); scene.add(fill);
 const grid = new THREE.GridHelper(640, 32, 0x1a2647, 0x121a30);
 grid.position.y = -2; scene.add(grid);
 
@@ -215,6 +220,7 @@ const agvMesh = {};           // id -> {mesh, target:{x,y,z,ang}}
 let LAYOUT = null, FLOOR_Y0 = {};
 
 const OK = new THREE.Color(0x22c55e), WARN = new THREE.Color(0xef4444);
+const LVLCOL = { '주의': 0xfacc15, '경고': 0xfb923c, '위험': 0xef4444 };  // 심각도별 색(정상=초록)
 
 function buildLayout(L) {
   LAYOUT = L;
@@ -229,16 +235,24 @@ function buildLayout(L) {
       new THREE.MeshStandardMaterial({ color:0x141d36, transparent:true, opacity:0.92, roughness:0.9 }));
     slab.position.set(((x0+x1)/2 - CX)*S, ey, ((zA+zC)/2 - fl.y0 - CZ_OFF)*S);
     scene.add(slab);
-    // tools (equipment)
+    // tools (equipment) — 설비별 높이 변주 + 로드포트(FOUP) 디테일
     fl.tools.forEach(t => {
+      const th = 9 + (t.label.charCodeAt(t.label.length - 1) % 4) * 1.6;   // 높이 변주(균일 격자 탈피)
       const m = new THREE.Mesh(
-        new THREE.BoxGeometry(t.w*S, 9, t.h*S),
-        new THREE.MeshStandardMaterial({ color:0x33406e, roughness:0.6, metalness:0.2 }));
-      m.position.set(wx(t.cx), ey + 5.4, wz(t.cy, fl.y0));
+        new THREE.BoxGeometry(t.w*S, th, t.h*S),
+        new THREE.MeshStandardMaterial({ color:0x33406e, roughness:0.55, metalness:0.28 }));
+      m.position.set(wx(t.cx), ey + th/2 + 0.9, wz(t.cy, fl.y0));
       scene.add(m);
       const edge = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),
         new THREE.LineBasicMaterial({ color:0x5a6ea8 }));
       edge.position.copy(m.position); scene.add(edge);
+      // 로드포트: 설비 앞면(관람자 방향) 작은 큐브 2개
+      for (const s of [-0.26, 0.26]) {
+        const lp = new THREE.Mesh(new THREE.BoxGeometry(Math.max(t.w*S*0.16, 2), 2.4, 2.2),
+          new THREE.MeshStandardMaterial({ color:0x4a5a8e, roughness:0.5 }));
+        lp.position.set(wx(t.cx) + t.w*S*s, ey + 2.1, wz(t.cy, fl.y0) - t.h*S*0.5 - 1.1);
+        scene.add(lp);
+      }
     });
     // tracks
     fl.tracks.forEach(([ax,ay,bx,by]) => {
@@ -348,11 +362,14 @@ function applyState(st) {
     rec.target = { x: wx(a.x), y: floorY(a.floor) + 6, z: wz(a.y, y0), ang: a.ang };
     rec.data = a;
     const warn = a.status === 'warn';
-    const col = warn ? WARN : OK;
-    rec.body.material.color.copy(col);
-    rec.body.material.emissive.copy(warn ? col : new THREE.Color(0x000000));
-    rec.body.material.emissiveIntensity = warn ? 0.9 : 0;
-    rec.ring.visible = warn; rec.beam.visible = warn;
+    const hex = warn ? (LVLCOL[a.level] ?? 0xef4444) : 0x22c55e;    // 심각도별 색
+    rec.body.material.color.setHex(hex);
+    rec.body.material.emissive.setHex(warn ? hex : 0x000000);
+    rec.body.material.emissiveIntensity = warn ? 0.75 : 0;
+    // 링·빔(층 관통 경고)은 심각(경고·위험)만 — 주의는 색만 → '빨강 벽' 방지
+    const severe = a.level === '경고' || a.level === '위험';
+    rec.ring.visible = severe; rec.beam.visible = severe;
+    rec.ring.material.color.setHex(hex); rec.beam.material.color.setHex(hex);
   });
   // 최우선 경고(최고 신뢰도) 추적 → 자동 포커스 버튼
   worst = st.alerts.slice().sort((x, y) => y.conf - x.conf)[0] || null;
