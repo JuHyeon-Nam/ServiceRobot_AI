@@ -60,6 +60,25 @@ def diag_code(pred: str, conf: float) -> int:
     return 0 if pred == "정상" else _LVL_CODE[alert_level(conf)]
 
 
+DRIFT_MARGIN = 0.5      # B2: 추세 방향 판정 임계(뒤 절반 평균 - 앞 절반 평균)
+
+
+def trend_direction(trend: list) -> str:
+    """진단 추세(0~3 코드열)의 방향 판정 — 드리프트 조기 감지.
+    뒷부분 평균이 앞부분보다 임계 이상 높으면 '악화'(아직 정상이어도 나빠지는 중), 낮으면 '개선', 그 외 '안정'.
+    → 고장이 터지기 '전에' 악화 추세를 잡아내는 예지보전의 핵심 지표."""
+    if len(trend) < 4:
+        return "안정"
+    h = len(trend) // 2
+    early = sum(trend[:h]) / h
+    late = sum(trend[h:]) / (len(trend) - h)
+    if late - early >= DRIFT_MARGIN:
+        return "악화"
+    if early - late >= DRIFT_MARGIN:
+        return "개선"
+    return "안정"
+
+
 def agv_sensors(i: int, n: int, pred: str) -> dict:
     """AGV 실시간 텔레메트리(진동·배터리·온도)를 결정론적으로 산출.
     replay 인덱스(i)에 위상을 고정해 재현 가능하고, 진단(pred)에 물리적으로 커플링한다.
@@ -112,20 +131,22 @@ def snapshot():
         level = alert_level(conf) if warn else None
         lo = max(0, i - (TREND_W - 1))         # B3: 최근 N틱 진단 추세(0~3 코드)
         trend = [diag_code(t["pred"][k], round(float(t["conf"][k]), 3)) for k in range(lo, i + 1)]
+        trend_dir = trend_direction(trend)      # B2: 악화/개선/안정 방향(드리프트 조기 감지)
         item = {"id": a["id"], "x": round(x, 2), "y": round(y, 2), "ang": round(ang, 1),
                 "floor": a["floor"], "status": "warn" if warn else "ok",
                 "pred": pred, "label": KOR.get(pred, pred), "conf": conf, "level": level,
                 "sensors": agv_sensors(i, n, pred), "cause": CAUSE.get(pred, CAUSE["정상"]),
-                "trend": trend}
+                "trend": trend, "trend_dir": trend_dir}
         agvs.append(item)
         if warn:
             alerts.append({"id": a["id"], "label": item["label"], "conf": conf,
                            "floor": a["floor"], "level": level})
     w = sum(per)
     by_level = {L: sum(al["level"] == L for al in alerts) for L in LEVELS}
+    deteriorating = sum(a["trend_dir"] == "악화" for a in agvs)   # B2: 악화 추세(드리프트) 대수
     return {"type": "state", "p": round(p, 4), "agvs": agvs,
             "kpi": {"total": len(PLAN), "ok": len(PLAN) - w, "warn": w,
-                    "per_floor": per, "by_level": by_level},
+                    "per_floor": per, "by_level": by_level, "deteriorating": deteriorating},
             "alerts": alerts}
 
 

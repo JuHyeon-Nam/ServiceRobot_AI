@@ -124,7 +124,7 @@
 </div>
 
 <div class="hud" id="alerts">
-  <h2>🚨 실시간 이상 경고</h2>
+  <h2>🚨 실시간 이상 경고 <span id="deteriorating"></span></h2>
   <div id="alertList"><div class="alert"><span class="cf">대기 중…</span></div></div>
 </div>
 
@@ -327,6 +327,11 @@ function applyState(st) {
   document.getElementById('kTotal').textContent = st.kpi.total;
   document.getElementById('kOk').textContent = st.kpi.ok;
   document.getElementById('kWarn').textContent = st.kpi.warn;
+  // B2: 악화 추세(드리프트) — 아직 정상이어도 나빠지는 중인 설비 조기 경고
+  const det = st.kpi.deteriorating || 0;
+  const dEl = document.getElementById('deteriorating');
+  dEl.textContent = det ? `· 📉 악화 추세 ${det}대` : '';
+  dEl.style.color = det ? '#fb923c' : '';
   // alerts
   const al = document.getElementById('alertList');
   al.innerHTML = st.alerts.length ? st.alerts.slice().sort((x, y) => y.conf - x.conf).map(a =>
@@ -425,8 +430,12 @@ function showSel(a) {
   document.getElementById('trendRow').innerHTML =
     tr.map(c => `<i style="background:${TC[c] || '#22c55e'}"></i>`).join('');
   const warnN = tr.filter(c => c > 0).length;
-  document.getElementById('trendNow').textContent =
-    tr.length ? `(최근 ${tr.length}틱 중 이상 ${warnN})` : '';
+  const dir = a.trend_dir || '안정';                 // B2: 악화/개선/안정
+  const dmark = { '악화': '📉 악화 추세', '개선': '📈 개선', '안정': '● 안정' }[dir];
+  const dcolor = { '악화': '#fb923c', '개선': '#22c55e', '안정': '#9fb0d8' }[dir];
+  const tn = document.getElementById('trendNow');
+  tn.innerHTML = tr.length
+    ? `<span style="color:${dcolor}">${dmark}</span> · 최근 ${tr.length}틱 중 이상 ${warnN}` : '';
 }
 
 // tap to select

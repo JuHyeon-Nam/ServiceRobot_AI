@@ -122,3 +122,17 @@ def test_trend_history_contract(client):
     # diag_code 매핑: 정상=0, 위험(고신뢰)=3
     assert diag_code("정상", 0.99) == 0
     assert diag_code("E-RBT-B", 0.99) == 3
+
+
+def test_trend_direction_drift(client):
+    """B2: 악화 추세(드리프트) 조기 감지 — 방향 판정 + snapshot/KPI 계약."""
+    from realtime_server import trend_direction
+    assert trend_direction([0, 0, 0, 0, 2, 2, 3, 3]) == "악화"   # 뒤로 갈수록 나빠짐
+    assert trend_direction([3, 3, 2, 2, 0, 0, 0, 0]) == "개선"   # 뒤로 갈수록 좋아짐
+    assert trend_direction([1, 1, 1, 1, 1, 1]) == "안정"
+    assert trend_direction([0, 0]) == "안정"                     # 너무 짧으면 안정
+    s = client.get("/api/snapshot").json()
+    assert all(a["trend_dir"] in ("악화", "개선", "안정") for a in s["agvs"])
+    det = s["kpi"]["deteriorating"]
+    assert isinstance(det, int)
+    assert det == sum(a["trend_dir"] == "악화" for a in s["agvs"]), "악화 집계가 AGV별 방향과 불일치"
