@@ -26,14 +26,25 @@ DATA, ASSETS = "../data/processed", "../assets"
 PAGE, PANEL, PHEAD, PEC = "#f6f8fb", "#ffffff", "#e9eef5", "#d4dae3"
 TOOL_FC, TOOL_EC, TLAB = "#e9edf3", "#b6bfcb", "#5b6472"
 TRKBAND, RAIL, OHT = "#e6ebf2", "#aab6c9", "#7dd3fc"
-GREEN, GREEN_E, RED, RED_E, FOUP = "#16a34a", "#15803d", "#dc2626", "#b91c1c", "#3f4b5e"
 HEAD_BG = "#0f172a"
+# AGV 섀시(금속 회색) — 상태색은 FOUP 포드·진행등·헤일로에 (3D 트윈과 동일 컨셉)
+STEEL_FC, STEEL_EC, WHEEL = "#cbd5e1", "#8b97a8", "#334155"
+# 진단 신뢰도(conf) 기반 4단계 심각도 색 (realtime_server.alert_level 과 동일 경계)
+LV = {"정상": ("#22c55e", "#15803d"), "주의": ("#eab308", "#a16207"),
+      "경고": ("#f97316", "#c2410c"), "위험": ("#ef4444", "#b91c1c")}
 KOR = {"E-ENV-C": "교차로 충돌위험", "E-ENV-O": "경로 장애물", "E-INF-A": "도어 연동",
        "E-INF-E": "층간리프트 연동", "E-RBT-B": "배터리 저하", "E-RBT-E": "긴급정지",
        "E-RBT-N": "통신 끊김", "E-RBT-S": "센서 이상", "정상": "정상"}
 W, H = FL.CANVAS["w"], FL.CANVAS["h"]
-CART = [(-2.4, -1.2), (1.2, -1.2), (2.9, 0), (1.2, 1.2), (-2.4, 1.2)]
-FBOX = [(-1.5, -0.9), (0.3, -0.9), (0.3, 0.9), (-1.5, 0.9)]
+# 탑다운 실제 AGV 형상(+x = 진행방향): 섀시 + 바퀴 4 + 중앙 FOUP 포드 + 전방 진행등
+BODY = [(-2.6, -1.6), (1.9, -1.6), (2.7, -0.6), (2.7, 0.6), (1.9, 1.6), (-2.6, 1.6)]
+POD = [(-1.7, -1.05), (0.5, -1.05), (0.5, 1.05), (-1.7, 1.05)]
+NOSE = [(2.0, -0.62), (2.7, -0.55), (2.7, 0.55), (2.0, 0.62)]
+WHEELS = [(-1.9, 1.55), (1.1, 1.55), (-1.9, -1.55), (1.1, -1.55)]
+
+
+def level(conf):   # 신뢰도 → 심각도 등급 (고장 예측 AGV에만 적용)
+    return "위험" if conf >= 0.85 else "경고" if conf >= 0.60 else "주의"
 
 
 def rot(pts, ang, cx, cy):
@@ -89,9 +100,13 @@ def draw_fab(ax, layout):
         sp.set_visible(False)
 
 
-def draw_agv(ax, x, y, ang, col, ec):
-    ax.add_patch(Polygon(rot(CART, ang, x, y), closed=True, fc=col, ec=ec, lw=0.8, alpha=0.97, zorder=5))
-    ax.add_patch(Polygon(rot(FBOX, ang, x, y), closed=True, fc=FOUP, ec="none", zorder=5.2))
+def draw_agv(ax, x, y, ang, pod_fc, pod_ec, nose_fc):
+    for wxx, wyy in WHEELS:                       # 바퀴 4개(진한 회색)
+        w = [(wxx - 0.55, wyy - 0.28), (wxx + 0.55, wyy - 0.28), (wxx + 0.55, wyy + 0.28), (wxx - 0.55, wyy + 0.28)]
+        ax.add_patch(Polygon(rot(w, ang, x, y), closed=True, fc=WHEEL, ec="none", zorder=4.9))
+    ax.add_patch(Polygon(rot(BODY, ang, x, y), closed=True, fc=STEEL_FC, ec=STEEL_EC, lw=0.8, zorder=5))    # 섀시
+    ax.add_patch(Polygon(rot(POD, ang, x, y), closed=True, fc=pod_fc, ec=pod_ec, lw=0.6, zorder=5.2))       # FOUP 포드(상태색)
+    ax.add_patch(Polygon(rot(NOSE, ang, x, y), closed=True, fc=nose_fc, ec="none", zorder=5.3))             # 전방 진행등
 
 
 def main():
@@ -102,30 +117,34 @@ def main():
         gg = rep[rep.robot == rid].sort_values("seq").reset_index(drop=True)
         px, py = gg.px.to_numpy(), gg.py.to_numpy()
         step = np.r_[0, np.cumsum(np.hypot(np.diff(px), np.diff(py)))]
-        traj[rid] = dict(prog=step / (step[-1] + 1e-9), pred=gg["pred"].to_numpy(), n=len(gg))
+        traj[rid] = dict(prog=step / (step[-1] + 1e-9), pred=gg["pred"].to_numpy(),
+                         conf=gg["conf"].to_numpy(), n=len(gg))
     layout = FL.build_layout(); plan = FL.build_agv_plan(robots)
 
     def sample(a, p):
         t = traj[a["robot"]]; i = int(p * (t["n"] - 1))
         s = (t["prog"][i] + a["phase"]) % 1.0
         x, y, ang = a["route"].at(s)
-        return x, y, np.deg2rad(ang), s, t["pred"][i]
+        return x, y, np.deg2rad(ang), s, t["pred"][i], t["conf"][i]
 
     def render(ax, p):
         draw_fab(ax, layout)
         per = [0, 0, 0]; tot = 0
         for a in plan:
-            x, y, ang, s, pred = sample(a, p)
-            err = pred != "정상"; col = RED if err else GREEN; ec = RED_E if err else GREEN_E
+            x, y, ang, s, pred, conf = sample(a, p)
+            err = pred != "정상"
+            lvl = level(conf) if err else "정상"       # 심각도 등급(정상/주의/경고/위험)
+            fc, ec = LV[lvl]
+            severe = lvl in ("경고", "위험")             # 헤일로·라벨은 심각한 것만 → '빨강 벽' 방지
             per[a["floor"]] += int(err); tot += int(err)
             for b in range(6, 0, -1):
                 xb, yb, _ = a["route"].at(s - b * 0.012)
-                ax.add_patch(Circle((xb, yb), 0.4, color=col, alpha=0.05 + 0.28 * (6 - b) / 6, zorder=4))
-            if err:
-                ax.add_patch(Circle((x, y), 3.0, color=RED, alpha=0.15, zorder=4.5))
-            draw_agv(ax, x, y, ang, col, ec)
-            if err:
-                ax.text(x, y - 3.0, KOR.get(pred, pred), fontsize=4.2, color=RED, ha="center", zorder=6)
+                ax.add_patch(Circle((xb, yb), 0.4, color=fc, alpha=0.05 + 0.28 * (6 - b) / 6, zorder=4))
+            if severe:
+                ax.add_patch(Circle((x, y), 3.0, color=fc, alpha=0.16, zorder=4.5))
+            draw_agv(ax, x, y, ang, fc, ec, fc)
+            if severe:
+                ax.text(x, y - 3.2, KOR.get(pred, pred), fontsize=4.2, color=ec, ha="center", zorder=6)
         ax.text(3, H - 4.5, "FAB AMHS MONITOR", fontsize=12.5, weight="bold", color="white", va="center", zorder=9)
         ax.text(108, H - 4.5, "반도체 라인(3F) AGV 실시간 예지보전 관제", fontsize=8, color="#94a3b8", va="center", zorder=9)
         n = len(plan)
@@ -133,10 +152,10 @@ def main():
                 ha="right", color=("#fca5a5" if tot else "#86efac"), va="center", zorder=9)
         for f, w in zip(layout["floors"], per):
             ax.text(FL.PX1, f["geo"]["y0"] + FL.FH - 5.3, f"경고 {w}", fontsize=6.2, ha="right", va="center",
-                    color=(RED if w else "#15803d"), zorder=1.4)
-        ax.legend(handles=[Line2D([0], [0], marker="s", color="w", markerfacecolor=GREEN, label="정상 AGV", markersize=9),
-                           Line2D([0], [0], marker="s", color="w", markerfacecolor=RED, label="고장 경고", markersize=9)],
-                  loc="lower left", bbox_to_anchor=(0.004, -0.015), fontsize=7.5, frameon=False, ncol=2)
+                    color=(LV["위험"][0] if w else "#15803d"), zorder=1.4)
+        ax.legend(handles=[Line2D([0], [0], marker="s", color="w", markerfacecolor=LV[k][0], label=k, markersize=9)
+                           for k in ("정상", "주의", "경고", "위험")],
+                  loc="lower left", bbox_to_anchor=(0.004, -0.015), fontsize=7.5, frameon=False, ncol=4)
         return tot
 
     best = 0.5

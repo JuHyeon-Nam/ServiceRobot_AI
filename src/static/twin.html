@@ -235,31 +235,43 @@ function buildLayout(L) {
       new THREE.MeshStandardMaterial({ color:0x141d36, transparent:true, opacity:0.92, roughness:0.9 }));
     slab.position.set(((x0+x1)/2 - CX)*S, ey, ((zA+zC)/2 - fl.y0 - CZ_OFF)*S);
     scene.add(slab);
-    // tools (equipment) — 설비별 높이 변주 + 로드포트(FOUP) 디테일
+    // 공정 설비 — 베이스 플린스 + 본체(베이별 색 변주·높이 변주) + 상단 서비스 유닛 + 로드포트(FOUP)
+    const BAYCOL = [0x2f3c66, 0x323f5c, 0x384166, 0x2c3a58, 0x3a3f60];
     fl.tools.forEach(t => {
-      const th = 9 + (t.label.charCodeAt(t.label.length - 1) % 4) * 1.6;   // 높이 변주(균일 격자 탈피)
-      const m = new THREE.Mesh(
-        new THREE.BoxGeometry(t.w*S, th, t.h*S),
-        new THREE.MeshStandardMaterial({ color:0x33406e, roughness:0.55, metalness:0.28 }));
-      m.position.set(wx(t.cx), ey + th/2 + 0.9, wz(t.cy, fl.y0));
-      scene.add(m);
+      const th = 9 + (t.label.charCodeAt(t.label.length - 1) % 4) * 1.8;    // 높이 변주(균일 격자 탈피)
+      const bc = BAYCOL[t.label.charCodeAt(0) % BAYCOL.length];             // 베이별 색 변주
+      const cx3 = wx(t.cx), cz3 = wz(t.cy, fl.y0);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(t.w*S+2, 1.6, t.h*S+2),  // 바닥 받침
+        new THREE.MeshStandardMaterial({ color:0x1b2440, roughness:0.9 }));
+      base.position.set(cx3, ey + 1.3, cz3); scene.add(base);
+      const m = new THREE.Mesh(new THREE.BoxGeometry(t.w*S, th, t.h*S),          // 본체
+        new THREE.MeshStandardMaterial({ color:bc, roughness:0.5, metalness:0.32 }));
+      m.position.set(cx3, ey + th/2 + 1.6, cz3); scene.add(m);
       const edge = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),
         new THREE.LineBasicMaterial({ color:0x5a6ea8 }));
       edge.position.copy(m.position); scene.add(edge);
-      // 로드포트: 설비 앞면(관람자 방향) 작은 큐브 2개
-      for (const s of [-0.26, 0.26]) {
-        const lp = new THREE.Mesh(new THREE.BoxGeometry(Math.max(t.w*S*0.16, 2), 2.4, 2.2),
-          new THREE.MeshStandardMaterial({ color:0x4a5a8e, roughness:0.5 }));
-        lp.position.set(wx(t.cx) + t.w*S*s, ey + 2.1, wz(t.cy, fl.y0) - t.h*S*0.5 - 1.1);
+      const top = new THREE.Mesh(new THREE.BoxGeometry(t.w*S*0.5, 3, t.h*S*0.5), // 상단 유닛(EFEM/팬필터)
+        new THREE.MeshStandardMaterial({ color:0x46557f, roughness:0.6, metalness:0.2 }));
+      top.position.set(cx3, ey + th + 1.6 + 1.5, cz3); scene.add(top);
+      for (const s of [-0.26, 0.26]) {                                          // 로드포트(FOUP) 앞면 큐브 2개
+        const lp = new THREE.Mesh(new THREE.BoxGeometry(Math.max(t.w*S*0.16, 2), 2.6, 2.2),
+          new THREE.MeshStandardMaterial({ color:0x59699c, roughness:0.45, metalness:0.15 }));
+        lp.position.set(cx3 + t.w*S*s, ey + 2.9, cz3 - t.h*S*0.5 - 1.1);
         scene.add(lp);
       }
     });
-    // tracks
+    // AGV 주행 레인(바닥 페인트 라인) + 중앙 가이드라인
     fl.tracks.forEach(([ax,ay,bx,by]) => {
+      const x1=wx(ax), z1=wz(ay,fl.y0), x2=wx(bx), z2=wz(by,fl.y0);
+      const len=Math.hypot(x2-x1, z2-z1); if (len < 0.5) return;
+      const lane = new THREE.Mesh(new THREE.BoxGeometry(len, 0.3, 2.6),
+        new THREE.MeshStandardMaterial({ color:0x28406e, roughness:0.85, emissive:0x0a1830, emissiveIntensity:0.3 }));
+      lane.position.set((x1+x2)/2, ey+0.8, (z1+z2)/2);
+      lane.rotation.y = -Math.atan2(z2-z1, x2-x1);
+      scene.add(lane);
       const g = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(wx(ax), ey+0.9, wz(ay, fl.y0)),
-        new THREE.Vector3(wx(bx), ey+0.9, wz(by, fl.y0))]);
-      scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color:0x2a3a66 })));
+        new THREE.Vector3(x1, ey+1.0, z1), new THREE.Vector3(x2, ey+1.0, z2)]);
+      scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color:0x5f7ec2 })));
     });
     // OHT 오버헤드 레일(천장 반송)
     (fl.oht || []).forEach(([ax, ay, bx, by]) => {
@@ -319,21 +331,42 @@ function makeLabel(text, x, y, z) {
   return sp;
 }
 
+// 실제 팹 AGV(무인반송차) 형상: 하부 대차 + 바퀴 4 + 상단 FOUP 포드 + 상태 경광등(안돈)
 function agvFor(a) {
   if (agvMesh[a.id]) return agvMesh[a.id];
-  const body = new THREE.Mesh(new THREE.ConeGeometry(3.4, 9, 5),
-    new THREE.MeshStandardMaterial({ color:OK.clone(), emissive:0x000000 }));
-  body.rotation.x = Math.PI/2;          // point along +Z, we rotate group by heading
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(6.5, 0.7, 8, 28),
+  const grp = new THREE.Group();
+  const steel = new THREE.MeshStandardMaterial({ color:0xc3ccdf, roughness:0.5, metalness:0.35 });
+  const dark  = new THREE.MeshStandardMaterial({ color:0x252d45, roughness:0.75, metalness:0.2 });
+  const skirt = new THREE.Mesh(new THREE.BoxGeometry(7.6, 1.6, 10.6), dark);   // 하부 대차
+  skirt.position.y = 1.0; grp.add(skirt);
+  const chassis = new THREE.Mesh(new THREE.BoxGeometry(7.0, 2.6, 9.8), steel); // 본체 섀시
+  chassis.position.y = 3.0; grp.add(chassis);
+  const wheelGeo = new THREE.CylinderGeometry(1.1, 1.1, 0.9, 14);              // 바퀴 4개
+  const wheelMat = new THREE.MeshStandardMaterial({ color:0x0e121c, roughness:0.9 });
+  for (const sx of [-3.5, 3.5]) for (const sz of [-3.2, 3.2]) {
+    const w = new THREE.Mesh(wheelGeo, wheelMat);
+    w.rotation.z = Math.PI/2; w.position.set(sx, 1.05, sz); grp.add(w);
+  }
+  const foup = new THREE.Mesh(new THREE.BoxGeometry(5.6, 4.4, 5.6),           // 상단 반송 FOUP 포드
+    new THREE.MeshStandardMaterial({ color:0x9fb3d6, roughness:0.3, metalness:0.15, transparent:true, opacity:0.92 }));
+  foup.position.y = 6.6; grp.add(foup);
+  const lid = new THREE.Mesh(new THREE.BoxGeometry(5.8, 0.8, 5.8), dark);      // 포드 상단 커버
+  lid.position.y = 9.2; grp.add(lid);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.9, 0.7),           // 전방 진행등(+Z가 앞)
+    new THREE.MeshStandardMaterial({ color:0x22c55e, emissive:0x22c55e, emissiveIntensity:0.5 }));
+  head.position.set(0, 3.2, 5.0); grp.add(head);
+  const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 2.6, 14),  // 상단 상태 경광등(안돈)
+    new THREE.MeshStandardMaterial({ color:0x22c55e, emissive:0x22c55e, emissiveIntensity:0.7, transparent:true, opacity:0.95 }));
+  beacon.position.y = 10.8; grp.add(beacon);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(6.8, 0.7, 8, 30),       // 바닥 경고 헤일로
     new THREE.MeshBasicMaterial({ color:0xff3b3b, transparent:true, opacity:0.9 }));
-  ring.rotation.x = Math.PI/2; ring.position.y = -4.5; ring.visible = false;
-  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 70, 8),
-    new THREE.MeshBasicMaterial({ color:0xff5a5a, transparent:true, opacity:0.26 }));
-  beam.position.y = 33; beam.visible = false;
-  const grp = new THREE.Group(); grp.add(body); grp.add(ring); grp.add(beam);
+  ring.rotation.x = Math.PI/2; ring.position.y = 0.5; ring.visible = false; grp.add(ring);
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 70, 8),    // 층 관통 경고 빔
+    new THREE.MeshBasicMaterial({ color:0xff5a5a, transparent:true, opacity:0.24 }));
+  beam.position.y = 36; beam.visible = false; grp.add(beam);
   grp.userData = { agv:true, id:a.id };
   agvGroup.add(grp);
-  const rec = { mesh:grp, body, ring, beam, target:{x:0,y:0,z:0,ang:0} };
+  const rec = { mesh:grp, beacon, head, foup, ring, beam, target:{x:0,y:0,z:0,ang:0} };
   agvMesh[a.id] = rec; return rec;
 }
 
@@ -359,13 +392,19 @@ function applyState(st) {
     seen.add(a.id);
     const rec = agvFor(a);
     const y0 = FLOOR_Y0[a.floor] ?? 0;
-    rec.target = { x: wx(a.x), y: floorY(a.floor) + 6, z: wz(a.y, y0), ang: a.ang };
+    rec.target = { x: wx(a.x), y: floorY(a.floor) + 1.3, z: wz(a.y, y0), ang: a.ang };
     rec.data = a;
     const warn = a.status === 'warn';
     const hex = warn ? (LVLCOL[a.level] ?? 0xef4444) : 0x22c55e;    // 심각도별 색
-    rec.body.material.color.setHex(hex);
-    rec.body.material.emissive.setHex(warn ? hex : 0x000000);
-    rec.body.material.emissiveIntensity = warn ? 0.75 : 0;
+    // 섀시는 항상 금속 회색(실제 로봇) — 상태색은 경광등·진행등·(원거리 식별용) FOUP 틴트에
+    rec.beacon.material.color.setHex(hex);
+    rec.beacon.material.emissive.setHex(hex);
+    rec.beacon.material.emissiveIntensity = warn ? 0.95 : 0.55;
+    rec.head.material.color.setHex(hex);
+    rec.head.material.emissive.setHex(hex);
+    rec.foup.material.color.setHex(warn ? hex : 0x9fb3d6);
+    rec.foup.material.emissive.setHex(warn ? hex : 0x000000);
+    rec.foup.material.emissiveIntensity = warn ? 0.28 : 0;
     // 링·빔(층 관통 경고)은 심각(경고·위험)만 — 주의는 색만 → '빨강 벽' 방지
     const severe = a.level === '경고' || a.level === '위험';
     rec.ring.visible = severe; rec.beam.visible = severe;
@@ -518,10 +557,10 @@ function animate() {
     const r = agvMesh[id], t = r.target, p = r.mesh.position;
     p.x += (t.x - p.x) * k; p.y += (t.y - p.y) * k; p.z += (t.z - p.z) * k;
     r.mesh.rotation.y = -t.ang * Math.PI/180;
-    if (r.ring.visible) {                          // 이상 설비 하이라이트 맥동
+    if (r.ring.visible) {                          // 이상 설비 하이라이트 맥동(경광등 점멸)
       r.ring.scale.setScalar(1 + pulse * 0.5);
       r.ring.material.opacity = 0.35 + pulse * 0.6;
-      r.body.material.emissiveIntensity = 0.5 + pulse * 0.9;
+      r.beacon.material.emissiveIntensity = 0.6 + pulse * 0.9;
     }
   }
   if (focus) {                                     // 최우선 경고로 카메라 자동 이동
