@@ -155,3 +155,36 @@ def test_health_index_and_maintenance(client):
         assert 0 <= a["health"] <= 100 and isinstance(a["advice"], str) and a["advice"]
     assert s["kpi"]["maint_due"] == sum(a["health"] < 55 for a in s["agvs"]), "정비 집계 불일치"
     assert 0 <= s["kpi"]["avg_health"] <= 100
+
+
+def test_telemetry_store_pipeline():
+    """C4: 진단 이벤트 시계열 계층 — 선별 적재·이력 조회·롤업 집계·보존정책."""
+    from telemetry_store import TelemetryStore
+    st = TelemetryStore(":memory:", max_rows=5)
+    agvs = [
+        {"id": "AGV-01", "floor": 0, "status": "warn", "pred": "E-RBT-B", "conf": 0.9,
+         "level": "위험", "health": 30, "sensors": {"vib": 7, "batt": 20, "temp": 55}},
+        {"id": "AGV-02", "floor": 1, "status": "ok", "pred": "정상", "conf": 0.99,
+         "level": None, "health": 100, "sensors": {"vib": 2, "batt": 80, "temp": 38}},
+    ]
+    assert st.record(100.0, agvs) == 1          # 정상·건전100은 스킵, 이상 1건만 적재
+    st.record(101.0, agvs)
+    hist = st.history("AGV-01", 10)
+    assert len(hist) == 2 and hist[0]["pred"] == "E-RBT-B"   # 최신순
+    stats = st.stats()
+    assert stats["total"] == 2 and stats["by_level"].get("위험") == 2
+    assert stats["top_agv"][0]["agv"] == "AGV-01"
+    assert stats["by_floor"] == {"0": 2}
+    for t in range(10):                          # 보존정책: max_rows 초과분 삭제
+        st.record(200.0 + t, agvs)
+    st.prune()
+    assert st.stats()["total"] <= 5
+
+
+def test_telemetry_endpoints(client):
+    """C4: 시계열 데이터 계층 조회 API 계약(/api/stats · /api/history)."""
+    s = client.get("/api/stats").json()
+    assert {"total", "by_level", "by_floor", "top_agv", "avg_health"} <= s.keys()
+    assert isinstance(s["top_agv"], list)
+    r = client.get("/api/history", params={"agv": "AGV-01", "limit": 10})
+    assert r.status_code == 200 and isinstance(r.json(), list)

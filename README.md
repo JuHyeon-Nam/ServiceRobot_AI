@@ -160,6 +160,28 @@ cd src
 uvicorn realtime_server:app --reload      # http://127.0.0.1:8000 접속 → 라이브 관제
 ```
 
+#### 🗄️ 시계열 데이터 계층 — 적재 → 집계 → 조회 → 보존 (`telemetry_store.py`)
+
+진단을 화면에 흘려보내고 끝내지 않고, **시계열 데이터로 적재·집계·조회**하는 경량 데이터 파이프라인을 두었습니다. 표준 라이브러리 `sqlite3`만 사용(추가 설치 없음) — 향후 **MQTT 수집 / 외부 시계열DB(InfluxDB·TimescaleDB)** 로 교체해도 동일 인터페이스로 확장됩니다.
+
+```mermaid
+flowchart LR
+    T["진단 이벤트 스트림<br/>(2Hz 샘플)"] -->|record| S["SQLite 시계열 스토어<br/>이상·저건전도만 선별 적재"]
+    S -->|보존정책 prune| S
+    S -->|롤업 집계| A["/api/stats<br/>등급별·층별·최다결함·평균건전도"]
+    S -->|이력 조회| H["/api/history?agv=…<br/>설비별 진단 시계열"]
+```
+
+| 요소 | 내용 |
+|---|---|
+| **적재(ingest)** | 매 틱 진단을 2Hz로 샘플, **이상(warn)·저건전도(health<80) 이벤트만 선별 저장**해 저장량 바운드 |
+| **집계(rollup)** | `/api/stats` — 세션 누적 총계·등급별/층별 분포·**최다 결함 AGV Top5**·평균 건전도 |
+| **조회(query)** | `/api/history?agv=AGV-03&limit=200` — 설비 1대의 진단 시계열(시각·신뢰도·건전도·센서) |
+| **보존(retention)** | `max_rows` 초과분 자동 삭제(오래된 이벤트 prune) |
+| **저장소** | 기본 인메모리(세션 누적) · 환경변수 `TELEMETRY_DB=경로` 지정 시 파일로 durable |
+
+> 3D 트윈 상단 HUD에 `🗄 세션 적재 N건 · 최다결함 AGV-XX · 평균건전도 XX`가 실시간 갱신되어, 관제 화면에서 데이터가 쌓이는 것을 바로 확인할 수 있습니다.
+
 - 🗺️ **플로어 맵**: 5종 로봇 10대가 실제 좌표·진행방향(degree)으로 이동, AI 진단에 따라 🟢정상/🔴경고 색상
 - 🚨 **실시간 경고 피드**: 고장 예측 로봇을 카테고리(환경/인프라/로봇본체)·신뢰도와 함께 표시, 실제 라벨과 대조(🎯정답 표기)
 - 📊 **KPI**: 가동 로봇·정상·경고 수·운영 건전도 실시간 집계
@@ -215,6 +237,7 @@ ServiceRobot_AI/
 │   ├── app.py                        # ④ FastAPI 실시간 추론 서버
 │   ├── build_replay.py               # ⑤ 대시보드 재생 데이터 + 예측 사전계산
 │   ├── realtime_server.py            # ⑥ FastAPI + WebSocket 실시간 관제 서버
+│   ├── telemetry_store.py            #    시계열 데이터 계층(SQLite): 진단 이벤트 적재·집계·조회·보존
 │   ├── fab_layout.py                 #    팹 도면·AMHS 경로 단일 소스(서버/프론트 공유)
 │   ├── static/index.html             #    라이브 관제 대시보드(Canvas + WebSocket)
 │   ├── make_floorplan.py             #    팹 AGV 관제 시각화(탑다운 PNG) 생성
@@ -320,6 +343,8 @@ POST /predict
 - [x] **설명가능성(Explainability)** — `/predict`가 진단 근거(물리 신호 Top3) 반환, LightGBM 내장 SHAP로 경량 유지 + pytest
 - [x] **3D 디지털 트윈** — `/twin`(Three.js): 3개 층·장비·AGV를 3D로, 태블릿 터치 조작 + 탭→실시간 AI 진단, **설비 탭 시 실시간 센서 그래프(진동·배터리·온도) + AI 판단 근거** (`uvicorn realtime_server:app` → http://127.0.0.1:8000/twin )
 - [x] **자산 건전도 지표(Health Index) + 정비 우선순위** — 순간 분류를 넘어 최근 진단 추세를 종합한 0~100 건전도 점수·정비 트리아지 권고(설비 패널) + 플릿 정비 필요 대수·평균 건전도(KPI)
+- [x] **시계열 데이터 계층** — 진단 이벤트 SQLite 적재·롤업 집계(`/api/stats`)·설비별 이력 조회(`/api/history`)·보존정책 (무설치, 향후 MQTT/시계열DB 확장)
+- [ ] **MQTT 수집 + 외부 시계열DB 연동** — 엣지 브로커 → 스트림 적재 확장
 - [ ] **피처 중요도·혼동행렬 시각화** 이미지 README 첨부
 - [ ] **Docker 패키징** — `docker run` 한 줄 배포
 - [ ] **ONNX 변환** — 엣지/모바일/타 언어 추론 확장

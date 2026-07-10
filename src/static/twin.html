@@ -63,6 +63,7 @@
     background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:7px 16px; font-size:12px; }
   #legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
   #hint { top:50px; left:16px; font-size:11px; color:#7f90ba; }
+  #dataStat { top:70px; left:16px; font-size:11px; color:#8fb3e6; }
   #status { top:50px; right:16px; font-size:11px; color:#7f90ba; }
   #focusBtn { position:fixed; top:78px; right:16px; pointer-events:auto; cursor:pointer;
     background:rgba(90,20,20,.85); color:#ffd9d9; border:1px solid #7a2a2a; border-radius:10px;
@@ -86,7 +87,7 @@
     #focusBtn { top:auto; bottom:16px; right:12px; padding:11px 16px; font-size:13px; }
     #alerts { width:min(46vw, 260px); max-height:30vh; }
     #sel { width:min(80vw, 300px); }
-    #hint { display:none; }
+    #hint, #dataStat { display:none; }
     #status { top:60px; right:16px; }
     #title h1 { font-size:15px; }
     #sel .close { font-size:24px; padding:0 4px; }   /* 손가락 탭 타깃 확대 */
@@ -109,6 +110,7 @@
   <p>3개 층 · AGV 플릿 · AI 이상 진단 실시간 (LightGBM PdM)</p>
 </div>
 <div class="hud" id="hint">🖐 한 손가락 회전 · 두 손가락 확대/이동 · 설비 탭 → AI 진단 · 더블탭 → 시점 리셋</div>
+<div class="hud" id="dataStat">🗄 시계열 적재 대기…</div>
 <button id="fsBtn" title="풀스크린">⛶</button>
 <div class="hud" id="status">● 연결 중…</div>
 <button id="focusBtn" disabled>🎯 경고 없음</button>
@@ -546,12 +548,23 @@ function connect() {
   ws.onclose = () => { sEl.textContent = '● 재연결 시도…'; setTimeout(connect, 1500); };
   ws.onerror = () => ws.close();
 }
+// 시계열 데이터 계층: 세션 누적 이벤트 통계 폴링 → HUD 갱신(적재량·최다결함·평균건전도)
+async function pollStats() {
+  try {
+    const s = await (await fetch('/api/stats')).json();
+    const top = s.top_agv && s.top_agv[0];
+    document.getElementById('dataStat').textContent =
+      `🗄 세션 적재 ${s.total}건 · 최다결함 ${top ? top.agv + ' (' + top.events + ')' : '–'} · 평균건전도 ${s.avg_health ?? '–'}`;
+  } catch (e) {}
+}
+setInterval(pollStats, 3000);
+
 async function bootstrap() {
   try {
     const L = await (await fetch('/api/layout')).json(); buildLayout(L);
     const s = await (await fetch('/api/snapshot')).json(); applyState(s);
     document.getElementById('offline').style.display = 'none';
-    connect();
+    connect(); pollStats();
   } catch (err) {
     document.getElementById('status').textContent = '● 서버 미연결';
     document.getElementById('offline').style.display = 'flex';   // 서버 없이 열면 안내 표시

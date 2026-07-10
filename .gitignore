@@ -16,3 +16,6 @@ data/
 
 # 4. 기타 시스템 파일
 .DS_Store
+# 시계열 스토어 로컬 DB(TELEMETRY_DB 지정 시 생성)
+*.db
+data/processed/telemetry.db

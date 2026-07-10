@@ -9,6 +9,7 @@ realtime_server.py — 실시간 AGV 관제 서버 (FastAPI + WebSocket)
 """
 import os
 import math
+import time
 import asyncio
 import numpy as np
 import pandas as pd
@@ -16,6 +17,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import fab_layout as FL
+from telemetry_store import TelemetryStore
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(_HERE, "..", "data", "processed")
@@ -142,6 +144,8 @@ for rid in robots:
 PLAN = FL.build_agv_plan(robots)
 LAYOUT = FL.build_layout()
 P = {"v": 0.0}     # 전역 진행도(0~1 순환)
+# 시계열 데이터 계층(진단 이벤트 적재/집계/조회). 기본 인메모리, TELEMETRY_DB로 파일 durable.
+STORE = TelemetryStore(os.environ.get("TELEMETRY_DB", ":memory:"))
 
 
 def snapshot():
@@ -184,8 +188,14 @@ def snapshot():
 @app.on_event("startup")
 async def _advance():
     async def loop():
+        tick = 0
         while True:
             P["v"] = (P["v"] + 0.0035) % 1.0
+            tick += 1
+            if tick % 10 == 0:                         # ~2Hz로 진단 이벤트 시계열 적재
+                STORE.record(time.time(), snapshot()["agvs"])
+                if tick % 200 == 0:                    # 주기적 보존정책(오래된 이벤트 정리)
+                    STORE.prune()
             await asyncio.sleep(0.05)
     asyncio.create_task(loop())
 
@@ -198,6 +208,18 @@ def api_layout():
 @app.get("/api/snapshot")
 def api_snapshot():
     return JSONResponse(snapshot())
+
+
+@app.get("/api/history")
+def api_history(agv: str, limit: int = 200):
+    """설비 1대의 진단 이벤트 시계열 이력(최신순). 시계열 데이터 계층 조회 API."""
+    return JSONResponse(STORE.history(agv, min(max(limit, 1), 1000)))
+
+
+@app.get("/api/stats")
+def api_stats():
+    """세션 누적 진단 이벤트 롤업 집계(총계·등급별·층별·최다결함·평균건전도)."""
+    return JSONResponse(STORE.stats())
 
 
 @app.websocket("/ws")
