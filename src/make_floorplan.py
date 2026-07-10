@@ -1,7 +1,7 @@
 """
 make_floorplan.py — 대규모 반도체 FAB(다층) AGV 관제 시각화 (fab_layout 기반)
-  - assets/control_center.png : 3층 팹(베이-메시 트랙, 장비 48, AGV 27) 정적 뷰
-  - assets/control_center.gif : AGV가 메시 루프를 코너 꺾으며 순환하는 애니메이션
+  - assets/control_center.png : 3층 팹(베이-메시 트랙, 장비 48, AGV 27) 탑다운 정적 뷰
+    (탑다운 실제 AGV 글리프 · conf 기반 4단계 심각도 색 — 3D 트윈과 동일 컨셉)
 경로/도면은 fab_layout.py 단일 소스(라이브 대시보드와 동일). 색=모델 실제 예측.
 실행: cd src && python make_floorplan.py
 """
@@ -14,7 +14,6 @@ import matplotlib.pyplot as plt
 from matplotlib import font_manager
 from matplotlib.patches import FancyBboxPatch, Rectangle, Polygon, Circle
 from matplotlib.lines import Line2D
-from matplotlib.animation import FuncAnimation, PillowWriter
 import fab_layout as FL
 
 for cand in ["Malgun Gothic", "AppleGothic", "NanumGothic"]:
@@ -166,15 +165,6 @@ def main():
     render(ax, best); fig.tight_layout()
     fig.savefig(f"{ASSETS}/control_center.png", dpi=125, facecolor=PAGE); plt.close(fig)
     print("저장: control_center.png")
-
-    figg, axg = plt.subplots(figsize=(16, 10.6)); figg.patch.set_facecolor(PAGE)
-    NF, ps = 54, np.linspace(0, 1, 54)
-    def upd(k):
-        axg.clear(); render(axg, ps[k]); return []
-    FuncAnimation(figg, upd, frames=NF, interval=110).save(
-        f"{ASSETS}/control_center.gif", writer=PillowWriter(fps=10), dpi=66)
-    plt.close(figg)
-    print(f"저장: control_center.gif ({os.path.getsize(f'{ASSETS}/control_center.gif')/1e6:.1f}MB)")
 
 
 if __name__ == "__main__":

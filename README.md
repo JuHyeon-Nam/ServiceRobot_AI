@@ -25,12 +25,6 @@ _3개 층 팹을 3D로 — AGV·설비를 실시간 AI 진단, 이상 발생 시
 
 <sub>▶ 실행: <code>cd src &amp;&amp; uvicorn realtime_server:app</code> → <b>http://127.0.0.1:8000/twin</b> (터치로 회전·확대, 설비 탭 → 실시간 AI 진단, 더블탭 시점 리셋 · 풀스크린 · 태블릿 반응형)</sub>
 
-<br>
-
-<sub>▽ 초기 2D 관제 버전 (Canvas)</sub>
-
-![반도체 라인 AGV 관제(2D)](assets/control_center.gif)
-
 </div>
 
 ---
@@ -223,7 +217,7 @@ ServiceRobot_AI/
 │   ├── realtime_server.py            # ⑥ FastAPI + WebSocket 실시간 관제 서버
 │   ├── fab_layout.py                 #    팹 도면·AMHS 경로 단일 소스(서버/프론트 공유)
 │   ├── static/index.html             #    라이브 관제 대시보드(Canvas + WebSocket)
-│   ├── make_floorplan.py             #    팹 AGV 관제 시각화(PNG/GIF) 생성
+│   ├── make_floorplan.py             #    팹 AGV 관제 시각화(탑다운 PNG) 생성
 │   ├── make_visuals.py               #    혼동행렬·피처중요도 등 차트 생성
 │   ├── dashboard.py                  #    Streamlit 재생형 대시보드
 │   ├── analyze_6.py                  # 센서 한계 규명 EDA
@@ -246,7 +240,7 @@ cd src
 uvicorn realtime_server:app --reload   # ⭐ http://127.0.0.1:8000  실시간 관제 웹앱
 uvicorn app:app --reload               # REST 추론 API (/docs 에서 테스트)
 python evaluate_enhanced.py            # 공식 Validation 재측정 + 혼동행렬
-python make_floorplan.py               # 관제 PNG/GIF 재생성 (assets/)
+python make_floorplan.py               # 관제 도면 PNG 재생성 (assets/)
 streamlit run dashboard.py             # Streamlit 재생형 대시보드
 
 # 처음부터 재현 — 원본 데이터셋(4.2GB) 필요
@@ -282,7 +276,7 @@ POST /predict
                                             │
                     build_replay.py ▼ (예측 사전계산)
                           replay.parquet ──┬─▶ realtime_server.py + static/index.html (라이브)
-                                           ├─▶ make_floorplan.py (PNG/GIF)
+                                           ├─▶ make_floorplan.py (탑다운 PNG)
                                            └─▶ dashboard.py (Streamlit)
             도면/경로 단일 소스: fab_layout.py  (서버·시각화 공유)
 ```
@@ -325,6 +319,7 @@ POST /predict
 - [x] **Streamlit 관제 대시보드** + **FastAPI/WebSocket 실시간 스트리밍 관제**
 - [x] **설명가능성(Explainability)** — `/predict`가 진단 근거(물리 신호 Top3) 반환, LightGBM 내장 SHAP로 경량 유지 + pytest
 - [x] **3D 디지털 트윈** — `/twin`(Three.js): 3개 층·장비·AGV를 3D로, 태블릿 터치 조작 + 탭→실시간 AI 진단, **설비 탭 시 실시간 센서 그래프(진동·배터리·온도) + AI 판단 근거** (`uvicorn realtime_server:app` → http://127.0.0.1:8000/twin )
+- [x] **자산 건전도 지표(Health Index) + 정비 우선순위** — 순간 분류를 넘어 최근 진단 추세를 종합한 0~100 건전도 점수·정비 트리아지 권고(설비 패널) + 플릿 정비 필요 대수·평균 건전도(KPI)
 - [ ] **피처 중요도·혼동행렬 시각화** 이미지 README 첨부
 - [ ] **Docker 패키징** — `docker run` 한 줄 배포
 - [ ] **ONNX 변환** — 엣지/모바일/타 언어 추론 확장

@@ -79,6 +79,31 @@ def trend_direction(trend: list) -> str:
     return "안정"
 
 
+def health_index(trend: list, conf: float, warn: bool) -> int:
+    """설비 건전도 지표(0~100). 순간 분류를 넘어 '최근 추세'를 종합한 자산 건전도 점수.
+    - 최근 진단 추세(0~3 코드)의 평균 심각도가 높을수록 감점(간헐 이상 이력 반영)
+    - 현재 이상이면 신뢰도에 비례해 추가 감점
+    100=정상·안정, 낮을수록 정비 우선순위 ↑ → 예지보전 Health Index 컨셉."""
+    if not trend:
+        return 100
+    mean_sev = sum(trend) / len(trend)              # 0~3
+    score = 100 - mean_sev * 22                      # 추세 심각도 페널티
+    if warn:
+        score -= 10 + conf * 18                      # 현재 이상 가중(신뢰도 비례)
+    return int(max(2, min(100, round(score))))
+
+
+def maint_advice(health: int, trend_dir: str) -> str:
+    """건전도·추세 방향 → 정비 트리아지 권고(관제자가 바로 행동할 수 있는 한 줄)."""
+    if health >= 80:
+        return "정상 가동" if trend_dir != "악화" else "관찰(악화 추세)"
+    if health >= 55:
+        return "점검 권장(악화 추세)" if trend_dir == "악화" else "모니터링"
+    if health >= 30:
+        return "정비 권장"
+    return "정비 필요 · 우선 대응"
+
+
 def agv_sensors(i: int, n: int, pred: str) -> dict:
     """AGV 실시간 텔레메트리(진동·배터리·온도)를 결정론적으로 산출.
     replay 인덱스(i)에 위상을 고정해 재현 가능하고, 진단(pred)에 물리적으로 커플링한다.
@@ -133,11 +158,13 @@ def snapshot():
         lo = max(0, i - (TREND_W - 1))         # B3: 최근 N틱 진단 추세(0~3 코드)
         trend = [diag_code(t["pred"][k], round(float(t["conf"][k]), 3)) for k in range(lo, i + 1)]
         trend_dir = trend_direction(trend)      # B2: 악화/개선/안정 방향(드리프트 조기 감지)
+        health = health_index(trend, conf, warn)         # B4: 자산 건전도 지표(추세 종합)
+        advice = maint_advice(health, trend_dir)         # B4: 정비 트리아지 권고
         item = {"id": a["id"], "x": round(x, 2), "y": round(y, 2), "ang": round(ang, 1),
                 "floor": a["floor"], "status": "warn" if warn else "ok",
                 "pred": pred, "label": KOR.get(pred, pred), "conf": conf, "level": level,
                 "sensors": agv_sensors(i, n, pred), "cause": CAUSE.get(pred, CAUSE["정상"]),
-                "trend": trend, "trend_dir": trend_dir}
+                "trend": trend, "trend_dir": trend_dir, "health": health, "advice": advice}
         agvs.append(item)
         if warn:
             alerts.append({"id": a["id"], "label": item["label"], "conf": conf,
@@ -145,9 +172,12 @@ def snapshot():
     w = sum(per)
     by_level = {L: sum(al["level"] == L for al in alerts) for L in LEVELS}
     deteriorating = sum(a["trend_dir"] == "악화" for a in agvs)   # B2: 악화 추세(드리프트) 대수
+    maint_due = sum(a["health"] < 55 for a in agvs)              # B4: 정비 필요(건전도<55) 대수
+    avg_health = round(sum(a["health"] for a in agvs) / max(len(agvs), 1))
     return {"type": "state", "p": round(p, 4), "agvs": agvs,
             "kpi": {"total": len(PLAN), "ok": len(PLAN) - w, "warn": w,
-                    "per_floor": per, "by_level": by_level, "deteriorating": deteriorating},
+                    "per_floor": per, "by_level": by_level, "deteriorating": deteriorating,
+                    "maint_due": maint_due, "avg_health": avg_health},
             "alerts": alerts}
 
 

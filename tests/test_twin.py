@@ -136,3 +136,22 @@ def test_trend_direction_drift(client):
     det = s["kpi"]["deteriorating"]
     assert isinstance(det, int)
     assert det == sum(a["trend_dir"] == "악화" for a in s["agvs"]), "악화 집계가 AGV별 방향과 불일치"
+
+
+def test_health_index_and_maintenance(client):
+    """B4: 자산 건전도 지표(Health Index) + 정비 우선순위 계약 — 관제 KPI·설비 패널이 의존."""
+    from realtime_server import health_index, maint_advice
+    # 정상·안정은 만점, 이상이 반복·고신뢰일수록 낮음(단조성)
+    assert health_index([0, 0, 0, 0], 0.0, False) == 100
+    assert health_index([3, 3, 3, 3], 0.99, True) < 40
+    assert health_index([0, 0, 1, 2], 0.7, True) < health_index([0, 0, 0, 0], 0.0, False)
+    assert all(2 <= health_index(t, 0.9, True) <= 100 for t in ([1], [2, 3], [0, 1, 2, 3]))
+    # 권고는 건전도가 낮을수록 강한 조치
+    assert maint_advice(95, "안정") == "정상 가동"
+    assert "정비" in maint_advice(20, "악화")
+    # snapshot 계약: 모든 AGV에 0~100 건전도 + 권고 문자열, KPI 집계 정합
+    s = client.get("/api/snapshot").json()
+    for a in s["agvs"]:
+        assert 0 <= a["health"] <= 100 and isinstance(a["advice"], str) and a["advice"]
+    assert s["kpi"]["maint_due"] == sum(a["health"] < 55 for a in s["agvs"]), "정비 집계 불일치"
+    assert 0 <= s["kpi"]["avg_health"] <= 100

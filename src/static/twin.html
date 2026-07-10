@@ -41,6 +41,8 @@
   #sel .row span:first-child { color:#9fb0d8; }
   #sel .badge { font-size:12px; padding:3px 9px; border-radius:999px; font-weight:700; }
   #sel .close { pointer-events:auto; cursor:pointer; color:#9fb0d8; font-size:18px; line-height:1; }
+  #sel .hbar { height:7px; background:#0c1330; border:1px solid var(--line); border-radius:5px; overflow:hidden; margin:3px 0 5px; }
+  #sel .hbar i { display:block; height:100%; border-radius:5px; transition:width .35s, background .35s; }
   #sel .sens { margin-top:9px; border-top:1px solid var(--line); padding-top:8px; }
   #sel .sg { margin-bottom:7px; }
   #sel .sg label { display:flex; justify-content:space-between; font-size:11px; color:#9fb0d8; margin-bottom:3px; }
@@ -115,6 +117,7 @@
   <div class="chip"><b id="kTotal">–</b><span>가동</span></div>
   <div class="chip"><b id="kOk" style="color:var(--ok)">–</b><span>정상</span></div>
   <div class="chip"><b id="kWarn" style="color:var(--warn)">–</b><span>경고</span></div>
+  <div class="chip"><b id="kMaint" style="color:#fb923c">–</b><span>정비</span></div>
 </div>
 
 <div class="hud" id="legend">
@@ -146,6 +149,9 @@
     <div class="row"><span>신뢰도</span><span id="selConf">–</span></div>
     <div class="row"><span>층</span><span id="selFloor">–</span></div>
     <div class="row"><span>상태</span><span id="selStatus">–</span></div>
+    <div class="row"><span>건전도(Health)</span><span id="selHealth">–</span></div>
+    <div class="hbar"><i id="selHealthBar"></i></div>
+    <div class="row"><span>정비 권고</span><span id="selAdvice" class="badge">–</span></div>
     <div class="sens">
       <div class="sg"><label>진동 <em id="svVib">–</em> mm/s</label><canvas id="cVib" width="240" height="34"></canvas></div>
       <div class="sg"><label>배터리 <em id="svBatt">–</em> %</label><canvas id="cBatt" width="240" height="34"></canvas></div>
@@ -374,6 +380,7 @@ function applyState(st) {
   document.getElementById('kTotal').textContent = st.kpi.total;
   document.getElementById('kOk').textContent = st.kpi.ok;
   document.getElementById('kWarn').textContent = st.kpi.warn;
+  document.getElementById('kMaint').textContent = st.kpi.maint_due ?? 0;   // B4: 정비 필요 대수
   // B2: 악화 추세(드리프트) — 아직 정상이어도 나빠지는 중인 설비 조기 경고
   const det = st.kpi.deteriorating || 0;
   const dEl = document.getElementById('deteriorating');
@@ -466,6 +473,16 @@ function showSel(a) {
   document.getElementById('selConf').textContent = (a.conf*100).toFixed(1) + '%';
   document.getElementById('selFloor').textContent = ['2F','1F','B1'][a.floor] ?? a.floor;
   document.getElementById('selStatus').textContent = a.status==='warn' ? '이상 감지' : '정상';
+  // B4: 자산 건전도(Health Index) + 정비 트리아지 권고
+  const h = a.health ?? 100;
+  document.getElementById('selHealth').textContent = h + ' / 100';
+  const hb = document.getElementById('selHealthBar');
+  hb.style.width = h + '%';
+  hb.style.background = h >= 80 ? '#22c55e' : h >= 55 ? '#facc15' : h >= 30 ? '#fb923c' : '#ef4444';
+  const ad = document.getElementById('selAdvice'), adWarn = h < 55;
+  ad.textContent = a.advice ?? '–';
+  ad.style.background = adWarn ? '#5a1d1d' : '#1d4a2c';
+  ad.style.color = adWarn ? '#ffd0d0' : '#bff0cf';
   // 실시간 센서 그래프(진동·배터리·온도)
   const s = a.sensors;
   if (s) {
