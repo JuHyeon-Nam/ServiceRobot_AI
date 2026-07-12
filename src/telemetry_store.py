@@ -74,6 +74,21 @@ class TelemetryStore:
             cols = [c[0] for c in cur.description]
             return [dict(zip(cols, r)) for r in cur.fetchall()]
 
+    def trend(self, bucket_sec: int = 60, buckets: int = 15) -> list:
+        """시간 버킷 롤업(다운샘플링): 버킷별 이벤트 수·평균 건전도·등급별 집계.
+        시계열DB의 continuous aggregate 개념을 경량 구현 — 관제 추이 차트의 데이터 소스.
+        반환은 시간 오름차순(차트가 왼→오른쪽으로 그리도록)."""
+        with self.lock:
+            rows = self.cx.execute(
+                "SELECT CAST(ts/? AS INTEGER) b, COUNT(*), AVG(health), "
+                "SUM(level='위험'), SUM(level='경고'), SUM(level='주의') "
+                "FROM events GROUP BY b ORDER BY b DESC LIMIT ?",
+                (bucket_sec, buckets)).fetchall()
+        out = [{"t": r[0] * bucket_sec, "events": r[1],
+                "avg_health": round(r[2], 1) if r[2] is not None else None,
+                "danger": r[3], "warning": r[4], "caution": r[5]} for r in rows]
+        return list(reversed(out))
+
     def stats(self, since: float = 0.0) -> dict:
         """세션 누적 롤업 집계: 총 이벤트·등급별·층별 분포·최다 결함 AGV·평균 건전도."""
         with self.lock:

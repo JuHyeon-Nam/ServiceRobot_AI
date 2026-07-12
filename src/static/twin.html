@@ -59,6 +59,21 @@
   #sel .trow i { flex:1; border-radius:2px; background:#22c55e; }
   #sel .tleg { display:flex; gap:10px; margin-top:5px; font-size:10px; color:#9fb0d8; }
   #sel .tleg i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:3px; vertical-align:middle; }
+  #fleet { top:14px; left:50%; transform:translateX(-50%); width:330px;
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:8px 12px 9px; backdrop-filter:blur(6px); }
+  #fleet .ft { display:flex; justify-content:space-between; font-size:11px; color:#9fb0d8; margin-bottom:4px; }
+  #fleet .ft b { color:#e8eefc; font-weight:700; }
+  #fleet canvas { width:100%; height:46px; display:block; }
+  #fleet .fl { display:flex; gap:12px; margin-top:3px; font-size:10px; color:#9fb0d8; }
+  #fleet .fl i { display:inline-block; width:9px; height:3px; border-radius:2px; margin-right:4px; vertical-align:middle; }
+  #sel .hist { margin-top:9px; border-top:1px solid var(--line); padding-top:8px; }
+  #sel .hist .ht { display:flex; justify-content:space-between; font-size:11px; color:#9fb0d8; margin-bottom:5px; }
+  #sel .hist .ht a { color:#7fb3ff; text-decoration:none; pointer-events:auto; }
+  #sel .hist .hrow { display:flex; justify-content:space-between; gap:6px; font-size:11px; padding:2px 0;
+    border-bottom:1px dashed #16203c; }
+  #sel .hist .hrow .tm { color:#7f90ba; }
+  #sel .hist .hrow .hh { color:#9fb0d8; min-width:30px; text-align:right; }
   #legend { bottom:16px; left:50%; transform:translateX(-50%); display:flex; gap:14px;
     background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:7px 16px; font-size:12px; }
   #legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
@@ -87,7 +102,7 @@
     #focusBtn { top:auto; bottom:16px; right:12px; padding:11px 16px; font-size:13px; }
     #alerts { width:min(46vw, 260px); max-height:30vh; }
     #sel { width:min(80vw, 300px); }
-    #hint, #dataStat { display:none; }
+    #hint, #dataStat, #fleet { display:none; }
     #status { top:60px; right:16px; }
     #title h1 { font-size:15px; }
     #sel .close { font-size:24px; padding:0 4px; }   /* 손가락 탭 타깃 확대 */
@@ -120,6 +135,15 @@
   <div class="chip"><b id="kOk" style="color:var(--ok)">–</b><span>정상</span></div>
   <div class="chip"><b id="kWarn" style="color:var(--warn)">–</b><span>경고</span></div>
   <div class="chip"><b id="kMaint" style="color:#fb923c">–</b><span>정비</span></div>
+</div>
+
+<div class="hud" id="fleet">
+  <div class="ft"><span>📈 플릿 추이 <b>경고·건전도</b></span><span id="ftNow"></span></div>
+  <canvas id="fleetChart" width="612" height="92"></canvas>
+  <div class="fl">
+    <span><i style="background:#ef4444"></i>경고 이벤트/버킷</span>
+    <span><i style="background:#22c55e"></i>평균 건전도(0~100)</span>
+  </div>
 </div>
 
 <div class="hud" id="legend">
@@ -167,6 +191,10 @@
       <div class="tt">📈 진단 추세 · 최근 이력 <span id="trendNow"></span></div>
       <div class="trow" id="trendRow"></div>
       <div class="tleg"><span><i style="background:#22c55e"></i>정상</span><span><i style="background:#facc15"></i>주의</span><span><i style="background:#fb923c"></i>경고</span><span><i style="background:#ef4444"></i>위험</span></div>
+    </div>
+    <div class="hist">
+      <div class="ht"><span>🗄 적재된 이벤트 이력</span><a id="histCsv" href="#" target="_blank">CSV ↓</a></div>
+      <div id="histList"><div class="hrow"><span class="tm">이력 없음</span></div></div>
     </div>
   </div>
 </div>
@@ -511,6 +539,7 @@ function showSel(a) {
   const tn = document.getElementById('trendNow');
   tn.innerHTML = tr.length
     ? `<span style="color:${dcolor}">${dmark}</span> · 최근 ${tr.length}틱 중 이상 ${warnN}` : '';
+  pollHist(a.id);   // 적재된 이벤트 이력(시계열 스토어 조회, 3초 스로틀)
 }
 
 // tap to select
@@ -559,12 +588,61 @@ async function pollStats() {
 }
 setInterval(pollStats, 3000);
 
+// 플릿 추이 차트: /api/trend 시간버킷 롤업(다운샘플링) → 경고 이벤트·평균 건전도 이중 라인
+async function pollTrend() {
+  try {
+    const tr = await (await fetch('/api/trend?bucket=20&n=24')).json();   // 20초 버킷 × 24 ≈ 최근 8분
+    const c = document.getElementById('fleetChart'), g = c.getContext('2d');
+    const W = c.width, H = c.height; g.clearRect(0, 0, W, H);
+    if (tr.length < 2) { document.getElementById('ftNow').textContent = '수집 중…'; return; }
+    const warns = tr.map(b => (b.danger||0) + (b.warning||0) + (b.caution||0));
+    const wMax = Math.max(...warns, 1);
+    const xOf = k => k / (tr.length - 1) * (W - 8) + 4;
+    const line = (vals, lo, hi, color, fill) => {
+      const yOf = v => H - ((Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * (H - 10) - 5;
+      g.beginPath();
+      vals.forEach((v, k) => { const x = xOf(k), y = yOf(v); k ? g.lineTo(x, y) : g.moveTo(x, y); });
+      if (fill) { g.lineTo(W - 4, H); g.lineTo(4, H); g.closePath();
+        g.globalAlpha = 0.12; g.fillStyle = color; g.fill(); g.globalAlpha = 1; g.beginPath();
+        vals.forEach((v, k) => { const x = xOf(k), y = yOf(v); k ? g.lineTo(x, y) : g.moveTo(x, y); }); }
+      g.lineWidth = 2; g.strokeStyle = color; g.stroke();
+    };
+    line(warns, 0, wMax, '#ef4444', true);                              // 경고 이벤트/버킷
+    line(tr.map(b => b.avg_health ?? 100), 0, 100, '#22c55e', false);   // 평균 건전도
+    const last = tr[tr.length - 1];
+    document.getElementById('ftNow').textContent =
+      `경고 ${warns[warns.length - 1]} · 건전도 ${last.avg_health ?? '–'}`;
+  } catch (e) {}
+}
+setInterval(pollTrend, 5000);
+
+// 설비 이벤트 이력: 선택 AGV의 적재 이벤트를 /api/history로 조회(3초 스로틀) + CSV 반출 링크
+let histAt = 0, histFor = null;
+async function pollHist(id) {
+  const now = Date.now();
+  if (id === histFor && now - histAt < 3000) return;
+  histAt = now; histFor = id;
+  document.getElementById('histCsv').href = `/api/history?agv=${id}&fmt=csv`;
+  try {
+    const rows = await (await fetch(`/api/history?agv=${id}&limit=6`)).json();
+    const el = document.getElementById('histList');
+    if (!rows.length) { el.innerHTML = '<div class="hrow"><span class="tm">적재된 이상 이벤트 없음 ✓</span></div>'; return; }
+    el.innerHTML = rows.map(r => {
+      const t = new Date(r.ts * 1000).toTimeString().slice(0, 8);
+      const KOR = { 'E-ENV-C':'교차로 충돌위험','E-ENV-O':'경로 장애물','E-INF-A':'도어 연동','E-INF-E':'리프트 연동',
+                    'E-RBT-B':'배터리 저하','E-RBT-E':'긴급정지','E-RBT-N':'통신 끊김','E-RBT-S':'센서 이상' };
+      return `<div class="hrow"><span class="tm">${t}</span><span>${KOR[r.pred] ?? r.pred}</span>`
+        + `<span class="lv lv-${r.level}">${r.level ?? ''}</span><span class="hh">${r.health}</span></div>`;
+    }).join('');
+  } catch (e) {}
+}
+
 async function bootstrap() {
   try {
     const L = await (await fetch('/api/layout')).json(); buildLayout(L);
     const s = await (await fetch('/api/snapshot')).json(); applyState(s);
     document.getElementById('offline').style.display = 'none';
-    connect(); pollStats();
+    connect(); pollStats(); pollTrend();
   } catch (err) {
     document.getElementById('status').textContent = '● 서버 미연결';
     document.getElementById('offline').style.display = 'flex';   // 서버 없이 열면 안내 표시

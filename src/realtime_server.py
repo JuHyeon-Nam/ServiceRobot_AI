@@ -8,13 +8,15 @@ realtime_server.py — 실시간 AGV 관제 서버 (FastAPI + WebSocket)
 브라우저:  http://127.0.0.1:8000
 """
 import os
+import io
+import csv
 import math
 import time
 import asyncio
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 import fab_layout as FL
 from telemetry_store import TelemetryStore
@@ -210,16 +212,33 @@ def api_snapshot():
     return JSONResponse(snapshot())
 
 
+_HIST_COLS = ["ts", "pred", "conf", "level", "health", "vib", "batt", "temp"]
+
+
 @app.get("/api/history")
-def api_history(agv: str, limit: int = 200):
-    """설비 1대의 진단 이벤트 시계열 이력(최신순). 시계열 데이터 계층 조회 API."""
-    return JSONResponse(STORE.history(agv, min(max(limit, 1), 1000)))
+def api_history(agv: str, limit: int = 200, fmt: str = "json"):
+    """설비 1대의 진단 이벤트 시계열 이력(최신순). fmt=csv 로 리포팅용 CSV 반출."""
+    rows = STORE.history(agv, min(max(limit, 1), 1000))
+    if fmt == "csv":
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=_HIST_COLS)
+        w.writeheader()
+        w.writerows(rows)
+        return PlainTextResponse(buf.getvalue(), media_type="text/csv",
+                                 headers={"Content-Disposition": f"attachment; filename={agv}_events.csv"})
+    return JSONResponse(rows)
 
 
 @app.get("/api/stats")
 def api_stats():
     """세션 누적 진단 이벤트 롤업 집계(총계·등급별·층별·최다결함·평균건전도)."""
     return JSONResponse(STORE.stats())
+
+
+@app.get("/api/trend")
+def api_trend(bucket: int = 60, n: int = 15):
+    """시간 버킷 롤업(다운샘플링) — 버킷별 이벤트·평균건전도·등급 집계. 관제 추이 차트 소스."""
+    return JSONResponse(STORE.trend(min(max(bucket, 10), 3600), min(max(n, 2), 120)))
 
 
 @app.websocket("/ws")

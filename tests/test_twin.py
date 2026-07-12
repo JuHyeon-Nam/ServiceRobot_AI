@@ -188,3 +188,33 @@ def test_telemetry_endpoints(client):
     assert isinstance(s["top_agv"], list)
     r = client.get("/api/history", params={"agv": "AGV-01", "limit": 10})
     assert r.status_code == 200 and isinstance(r.json(), list)
+
+
+def test_trend_rollup_buckets():
+    """C4: 시간 버킷 롤업(다운샘플링) — 버킷 경계·평균·등급 집계·시간 오름차순."""
+    from telemetry_store import TelemetryStore
+    st = TelemetryStore(":memory:")
+    ev = lambda h, lv: [{"id": "AGV-01", "floor": 0, "status": "warn", "pred": "E-RBT-B",
+                         "conf": 0.9, "level": lv, "health": h,
+                         "sensors": {"vib": 5, "batt": 30, "temp": 50}}]
+    st.record(100.0, ev(40, "위험")); st.record(110.0, ev(60, "경고"))   # 버킷1 (60초)
+    st.record(170.0, ev(80, "주의"))                                     # 버킷2
+    tr = st.trend(bucket_sec=60, buckets=10)
+    assert len(tr) == 2
+    assert tr[0]["t"] < tr[1]["t"], "시간 오름차순이어야 함"
+    b1, b2 = tr[0], tr[1]
+    assert b1["events"] == 2 and b1["avg_health"] == 50.0
+    assert b1["danger"] == 1 and b1["warning"] == 1
+    assert b2["events"] == 1 and b2["caution"] == 1
+
+
+def test_trend_endpoint_and_csv_export(client):
+    """C4: /api/trend 계약 + /api/history CSV 반출(리포팅 연계)."""
+    tr = client.get("/api/trend", params={"bucket": 30, "n": 10}).json()
+    assert isinstance(tr, list)
+    for b in tr:
+        assert {"t", "events", "avg_health", "danger", "warning", "caution"} <= b.keys()
+    r = client.get("/api/history", params={"agv": "AGV-01", "fmt": "csv"})
+    assert r.status_code == 200
+    assert "text/csv" in r.headers["content-type"]
+    assert r.text.splitlines()[0] == "ts,pred,conf,level,health,vib,batt,temp"
