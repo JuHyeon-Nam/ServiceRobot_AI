@@ -13,6 +13,7 @@ telemetry_store.py — 실시간 진단 이벤트 시계열 데이터 계층 (SQ
 """
 import sqlite3
 import threading
+from collections import defaultdict
 
 _DDL = """CREATE TABLE IF NOT EXISTS events(
   ts     REAL,      -- epoch seconds
@@ -88,6 +89,56 @@ class TelemetryStore:
                 "avg_health": round(r[2], 1) if r[2] is not None else None,
                 "danger": r[3], "warning": r[4], "caution": r[5]} for r in rows]
         return list(reversed(out))
+
+    def reliability(self, agv: str = None, gap: float = 3.0, n_total: int = None) -> dict:
+        """신뢰성 지표(MTBF·MTTR·가용도) — 이벤트 스트림에서 '고장 에피소드'를 복원해 계산.
+        warn 이벤트(level 있음)가 gap초 이내로 연속되면 하나의 고장 구간(에피소드)으로 묶는다.
+        - MTTR  = 총 다운타임 / 에피소드 수 (평균 복구 시간)
+        - MTBF  = 총 가동시간 / 에피소드 수 (평균 고장 간격)
+        - 가용도 = 가동시간 / 관측시간  (신뢰성 공학의 Availability)
+        n_total(전체 설비 수)을 주면 무고장 설비까지 포함한 플릿 가용도를 계산한다."""
+        q = "SELECT agv, ts FROM events WHERE level IS NOT NULL"
+        args: tuple = ()
+        if agv:
+            q += " AND agv=?"; args = (agv,)
+        q += " ORDER BY agv, ts"
+        with self.lock:
+            rows = self.cx.execute(q, args).fetchall()
+            span = self.cx.execute("SELECT MIN(ts), MAX(ts) FROM events").fetchone()
+        zero = {"episodes": 0, "mttr": 0.0, "mtbf": None, "availability": 1.0}
+        if span[0] is None:
+            return dict(zero, window_sec=0.0) if agv else dict(zero, window_sec=0.0, worst=[])
+        window = max(span[1] - span[0], 1e-9)
+        per = defaultdict(list)
+        for a, ts in rows:
+            per[a].append(ts)
+        SAMPLE = 0.5                       # 적재 주기(2Hz) 보정: 단일 샘플도 최소 이 길이의 고장으로 간주
+        per_out = {}
+        for a, tss in per.items():
+            eps, down, start, prev = 0, 0.0, tss[0], tss[0]
+            for t in tss[1:]:
+                if t - prev > gap:         # 간격이 벌어지면 에피소드 종료
+                    eps += 1; down += (prev - start) + SAMPLE
+                    start = t
+                prev = t
+            eps += 1; down += (prev - start) + SAMPLE
+            down = min(down, window)
+            up = max(window - down, 0.0)
+            per_out[a] = {"episodes": eps, "mttr": round(down / eps, 1),
+                          "mtbf": round(up / eps, 1), "availability": round(up / window, 4)}
+        if agv:
+            return dict(per_out.get(agv, zero), window_sec=round(window, 1))
+        # 플릿 집계: 무고장 설비 포함(n_total) — 총 가동시간 대비 총 다운타임
+        n = max(n_total or len(per_out), len(per_out), 1)
+        total_down = sum(window - v["availability"] * window for v in per_out.values())
+        total_eps = sum(v["episodes"] for v in per_out.values())
+        fleet_up = window * n - total_down
+        worst = sorted(per_out.items(), key=lambda kv: kv[1]["availability"])[:5]
+        return {"window_sec": round(window, 1), "episodes": total_eps,
+                "mttr": round(total_down / max(total_eps, 1), 1),
+                "mtbf": round(fleet_up / max(total_eps, 1), 1),
+                "availability": round(fleet_up / (window * n), 4),
+                "worst": [dict(agv=a, **v) for a, v in worst]}
 
     def stats(self, since: float = 0.0) -> dict:
         """세션 누적 롤업 집계: 총 이벤트·등급별·층별 분포·최다 결함 AGV·평균 건전도."""

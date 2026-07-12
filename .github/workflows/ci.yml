@@ -28,3 +28,27 @@ jobs:
         env:
           PYTHONUTF8: "1"
         run: python -m pytest ../tests -q
+
+  # C2: Docker 패키징 검증 — 로컬에 docker가 없어도 CI가 매 push마다
+  # 이미지 빌드 + 컨테이너 기동 + 관제/데이터API/메트릭 스모크 테스트로 보증한다.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t servicerobot-ai .
+
+      - name: Smoke test (server boots, endpoints respond)
+        run: |
+          docker run -d --rm -p 8000:8000 --name twin servicerobot-ai
+          ok=0
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/api/snapshot >/dev/null && ok=1 && break
+            sleep 1
+          done
+          [ "$ok" = "1" ] || { echo "server did not boot"; docker logs twin; exit 1; }
+          curl -sf http://127.0.0.1:8000/twin | grep -q "디지털 트윈"
+          curl -sf http://127.0.0.1:8000/api/trend | grep -q "\["
+          curl -sf http://127.0.0.1:8000/metrics | grep -q "fab_agv_total"
+          docker stop twin

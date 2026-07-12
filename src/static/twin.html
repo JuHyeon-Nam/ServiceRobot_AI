@@ -194,6 +194,7 @@
     </div>
     <div class="hist">
       <div class="ht"><span>🗄 적재된 이벤트 이력</span><a id="histCsv" href="#" target="_blank">CSV ↓</a></div>
+      <div class="ht" style="margin-bottom:4px"><span>🛠 신뢰성</span><span id="relLine" style="color:#e8eefc">–</span></div>
       <div id="histList"><div class="hrow"><span class="tm">이력 없음</span></div></div>
     </div>
   </div>
@@ -580,10 +581,13 @@ function connect() {
 // 시계열 데이터 계층: 세션 누적 이벤트 통계 폴링 → HUD 갱신(적재량·최다결함·평균건전도)
 async function pollStats() {
   try {
-    const s = await (await fetch('/api/stats')).json();
+    const [s, rel] = await Promise.all([
+      (await fetch('/api/stats')).json(),
+      (await fetch('/api/reliability')).json()]);
     const top = s.top_agv && s.top_agv[0];
+    const av = rel.availability != null ? (rel.availability * 100).toFixed(1) + '%' : '–';
     document.getElementById('dataStat').textContent =
-      `🗄 세션 적재 ${s.total}건 · 최다결함 ${top ? top.agv + ' (' + top.events + ')' : '–'} · 평균건전도 ${s.avg_health ?? '–'}`;
+      `🗄 세션 적재 ${s.total}건 · 최다결함 ${top ? top.agv + ' (' + top.events + ')' : '–'} · 평균건전도 ${s.avg_health ?? '–'} · 플릿 가용도 ${av}`;
   } catch (e) {}
 }
 setInterval(pollStats, 3000);
@@ -624,6 +628,12 @@ async function pollHist(id) {
   histAt = now; histFor = id;
   document.getElementById('histCsv').href = `/api/history?agv=${id}&fmt=csv`;
   try {
+    // 설비 신뢰성 지표(MTBF·MTTR·가용도) — 신뢰성 공학 관점의 자산 요약
+    fetch(`/api/reliability?agv=${id}`).then(r => r.json()).then(rel => {
+      document.getElementById('relLine').textContent = rel.episodes
+        ? `가용도 ${(rel.availability * 100).toFixed(1)}% · MTBF ${rel.mtbf ?? '–'}s · MTTR ${rel.mttr}s · 고장 ${rel.episodes}회`
+        : '관측창 내 고장 없음 ✓';
+    }).catch(() => {});
     const rows = await (await fetch(`/api/history?agv=${id}&limit=6`)).json();
     const el = document.getElementById('histList');
     if (!rows.length) { el.innerHTML = '<div class="hrow"><span class="tm">적재된 이상 이벤트 없음 ✓</span></div>'; return; }

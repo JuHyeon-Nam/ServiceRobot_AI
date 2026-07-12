@@ -241,6 +241,36 @@ def api_trend(bucket: int = 60, n: int = 15):
     return JSONResponse(STORE.trend(min(max(bucket, 10), 3600), min(max(n, 2), 120)))
 
 
+@app.get("/api/reliability")
+def api_reliability(agv: str = None):
+    """신뢰성 지표(MTBF·MTTR·가용도) — 설비 1대(agv=) 또는 플릿 전체(worst 5 포함)."""
+    return JSONResponse(STORE.reliability(agv=agv, n_total=len(PLAN)))
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus 텍스트 포맷 메트릭 — 운영 모니터링(Grafana 등) 표준 연동점.
+    관제 KPI·데이터 계층·신뢰성 지표를 게이지로 노출한다."""
+    s = snapshot()["kpi"]
+    st = STORE.stats()
+    rel = STORE.reliability(n_total=len(PLAN))
+    g = lambda name, help_, val: (f"# HELP {name} {help_}\n# TYPE {name} gauge\n{name} {val}")
+    lines = [
+        g("fab_agv_total", "가동 AGV 수", s["total"]),
+        g("fab_agv_warn", "이상 감지 AGV 수", s["warn"]),
+        g("fab_agv_deteriorating", "악화 추세(드리프트) AGV 수", s["deteriorating"]),
+        g("fab_agv_maintenance_due", "정비 필요(건전도<55) AGV 수", s["maint_due"]),
+        g("fab_fleet_avg_health", "플릿 평균 건전도(0~100)", s["avg_health"]),
+        g("fab_events_stored", "시계열 스토어 적재 이벤트 수", st["total"]),
+        g("fab_fleet_availability", "플릿 가용도(0~1)", rel["availability"]),
+        g("fab_fleet_mttr_seconds", "평균 복구 시간(초)", rel["mttr"]),
+        g("fab_fleet_mtbf_seconds", "평균 고장 간격(초)", rel["mtbf"] if rel["mtbf"] is not None else 0),
+        g("fab_failure_episodes_total", "관측창 내 고장 에피소드 수", rel["episodes"]),
+    ]
+    return PlainTextResponse("\n".join(lines) + "\n",
+                             media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
 @app.websocket("/ws")
 async def ws(sock: WebSocket):
     await sock.accept()

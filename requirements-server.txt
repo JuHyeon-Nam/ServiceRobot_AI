@@ -1,0 +1,9 @@
+# 실시간 관제 서버(realtime_server) 전용 최소 의존성 — Docker 이미지 경량화용.
+# 전체 개발 환경은 requirements.txt 사용. 버전은 requirements.txt와 동일하게 유지할 것.
+numpy==2.4.4
+pandas==3.0.2
+pyarrow==24.0.0
+fastapi==0.136.1
+uvicorn==0.46.0
+pydantic==2.13.4
+websockets==16.0

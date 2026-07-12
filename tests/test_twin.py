@@ -208,6 +208,46 @@ def test_trend_rollup_buckets():
     assert b2["events"] == 1 and b2["caution"] == 1
 
 
+def test_reliability_metrics():
+    """C4: 신뢰성 지표(MTBF·MTTR·가용도) — 고장 에피소드 복원·집계."""
+    from telemetry_store import TelemetryStore
+    st = TelemetryStore(":memory:")
+    warn = lambda: [{"id": "AGV-01", "floor": 0, "status": "warn", "pred": "E-RBT-B",
+                     "conf": 0.9, "level": "위험", "health": 30,
+                     "sensors": {"vib": 5, "batt": 30, "temp": 50}}]
+    ok = lambda: [{"id": "AGV-02", "floor": 0, "status": "ok", "pred": "정상",
+                   "conf": 0.99, "level": None, "health": 70,   # 저건전도 정상(관측창 확장용)
+                   "sensors": {"vib": 2, "batt": 80, "temp": 38}}]
+    # AGV-01: 고장 에피소드 2개 (100~101초 연속, 그리고 120초 단발) · 관측창 100~130초
+    st.record(100.0, warn()); st.record(100.5, warn()); st.record(101.0, warn())
+    st.record(120.0, warn())
+    st.record(130.0, ok())
+    r1 = st.reliability(agv="AGV-01")
+    assert r1["episodes"] == 2, "gap(3초) 초과로 끊긴 에피소드 2개여야 함"
+    assert 0 < r1["availability"] < 1 and r1["mttr"] > 0 and r1["mtbf"] > 0
+    fleet = st.reliability(n_total=10)
+    assert fleet["episodes"] == 2 and 0 < fleet["availability"] <= 1
+    assert fleet["worst"] and fleet["worst"][0]["agv"] == "AGV-01"
+    # 무고장 설비 포함(n_total=10)이 미포함(1대)보다 가용도가 높아야 함
+    assert fleet["availability"] > st.reliability()["availability"] - 1e-9
+    # 이벤트 없으면 완전 가용
+    empty = TelemetryStore(":memory:").reliability()
+    assert empty["availability"] == 1.0 and empty["episodes"] == 0
+
+
+def test_reliability_and_prometheus_endpoints(client):
+    """C2/C4: /api/reliability 계약 + /metrics Prometheus 텍스트 포맷."""
+    rel = client.get("/api/reliability").json()
+    assert {"window_sec", "episodes", "mttr", "mtbf", "availability", "worst"} <= rel.keys()
+    one = client.get("/api/reliability", params={"agv": "AGV-01"}).json()
+    assert {"episodes", "mttr", "availability"} <= one.keys()
+    m = client.get("/metrics")
+    assert m.status_code == 200 and "text/plain" in m.headers["content-type"]
+    for name in ("fab_agv_total", "fab_fleet_avg_health", "fab_events_stored",
+                 "fab_fleet_availability", "fab_fleet_mttr_seconds"):
+        assert f"# TYPE {name} gauge" in m.text and f"\n{name} " in m.text, f"{name} 메트릭 누락"
+
+
 def test_trend_endpoint_and_csv_export(client):
     """C4: /api/trend 계약 + /api/history CSV 반출(리포팅 연계)."""
     tr = client.get("/api/trend", params={"bucket": 30, "n": 10}).json()

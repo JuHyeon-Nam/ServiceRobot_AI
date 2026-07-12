@@ -13,7 +13,7 @@
 
 [![CI](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml/badge.svg)](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml)
 
-**모델 2.8MB · 추론 1ms · GPU 불필요 · CPU 단독 동작 · 태블릿 조작 3D 디지털 트윈 관제**
+**모델 2.8MB · 추론 1ms · GPU 불필요 · CPU 단독 동작 · 태블릿 조작 3D 디지털 트윈 관제 · Docker 한 줄 배포**
 
 <br>
 
@@ -179,6 +179,8 @@ flowchart LR
 | **다운샘플링(time-bucket rollup)** | `/api/trend?bucket=60&n=15` — **시간 버킷별** 이벤트 수·평균 건전도·등급 집계 (시계열DB의 continuous aggregate 개념) → 관제 HUD **플릿 추이 라인차트**의 데이터 소스 |
 | **조회(query)** | `/api/history?agv=AGV-03&limit=200` — 설비 1대의 진단 시계열(시각·신뢰도·건전도·센서) |
 | **반출(export)** | `/api/history?agv=…&fmt=csv` — **CSV 다운로드**(리포팅·엑셀 연계), 설비 패널에 `CSV ↓` 버튼 |
+| **신뢰성 지표(reliability)** | `/api/reliability` — 이벤트 스트림에서 고장 에피소드를 복원해 **MTBF·MTTR·가용도(Availability)** 계산 (신뢰성 공학 지표), 최저 가용도 설비 Top5 |
+| **모니터링(observability)** | `/metrics` — **Prometheus 텍스트 포맷** 게이지(플릿 KPI·적재량·가용도·MTBF/MTTR) → Grafana 등 표준 모니터링 스택에 바로 연동 |
 | **보존(retention)** | `max_rows` 초과분 자동 삭제(오래된 이벤트 prune) |
 | **저장소** | 기본 인메모리(세션 누적) · 환경변수 `TELEMETRY_DB=경로` 지정 시 파일로 durable |
 
@@ -256,7 +258,11 @@ ServiceRobot_AI/
 ## 💻 실행 방법 (Quick Start)
 
 ```bash
-# 0) 환경
+# ⭐ Docker 한 줄 배포 (관제 서버) — CI가 매 push마다 빌드·스모크 테스트로 검증
+docker build -t servicerobot-ai . && docker run -p 8000:8000 servicerobot-ai
+# → http://127.0.0.1:8000/twin
+
+# 0) 환경 (로컬 개발)
 python -m venv venv && source venv/Scripts/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
@@ -347,9 +353,10 @@ POST /predict
 - [x] **자산 건전도 지표(Health Index) + 정비 우선순위** — 순간 분류를 넘어 최근 진단 추세를 종합한 0~100 건전도 점수·정비 트리아지 권고(설비 패널) + 플릿 정비 필요 대수·평균 건전도(KPI)
 - [x] **시계열 데이터 계층** — 진단 이벤트 SQLite 적재·롤업 집계(`/api/stats`)·설비별 이력 조회(`/api/history`)·보존정책 (무설치, 향후 MQTT/시계열DB 확장)
 - [x] **시계열 분석 계층** — 시간 버킷 다운샘플링(`/api/trend`) + 관제 HUD **플릿 추이 차트** + 설비 패널 **이벤트 이력·CSV 반출**
+- [x] **신뢰성 지표 + 운영 모니터링** — 고장 에피소드 복원 기반 **MTBF·MTTR·가용도**(`/api/reliability`) + **Prometheus `/metrics`**(Grafana 연동점)
+- [x] **Docker 패키징** — `docker run` 한 줄 배포(경량 서버 이미지) + **CI에서 빌드·컨테이너 스모크 테스트 자동 검증**
 - [ ] **MQTT 수집 + 외부 시계열DB 연동** — 엣지 브로커 → 스트림 적재 확장
 - [ ] **피처 중요도·혼동행렬 시각화** 이미지 README 첨부
-- [ ] **Docker 패키징** — `docker run` 한 줄 배포
 - [ ] **ONNX 변환** — 엣지/모바일/타 언어 추론 확장
 
 > 📌 작업 우선순위·일정: **[ROADMAP.md](ROADMAP.md)** (공채 스프린트) · 단계별 상세: **[NEXT_STEPS.md](NEXT_STEPS.md)**

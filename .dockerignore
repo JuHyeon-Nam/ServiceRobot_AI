@@ -1,0 +1,17 @@
+# 관제 서버 이미지에 불필요한 것 제외 (모델·재생데이터·src·static만 필요)
+.git
+.github
+venv
+__pycache__
+*.pyc
+assets
+tests
+src/archive
+*.gif
+*.png
+*.pptx
+*.pdf
+DEVLOG.md
+ROADMAP.md
+NEXT_STEPS.md
+README.md
