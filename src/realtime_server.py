@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 import fab_layout as FL
 from telemetry_store import TelemetryStore
+from dataset_quality import RoboticsDataQualityMonitor, records_from_agv_snapshot
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(_HERE, "..", "data", "processed")
@@ -148,6 +149,7 @@ LAYOUT = FL.build_layout()
 P = {"v": 0.0}     # 전역 진행도(0~1 순환)
 # 시계열 데이터 계층(진단 이벤트 적재/집계/조회). 기본 인메모리, TELEMETRY_DB로 파일 durable.
 STORE = TelemetryStore(os.environ.get("TELEMETRY_DB", ":memory:"))
+QUALITY = RoboticsDataQualityMonitor()
 
 
 def snapshot():
@@ -247,6 +249,19 @@ def api_reliability(agv: str = None):
     return JSONResponse(STORE.reliability(agv=agv, n_total=len(PLAN)))
 
 
+@app.get("/api/data-quality")
+def api_data_quality():
+    """로보틱스 학습 데이터 QA 지표.
+
+    현재 AGV 스냅샷을 표준 학습 데이터 레코드로 변환해 스키마 정합성, annotation coverage,
+    QA pass rate, ingest success rate, rework rate를 계산한다. 제조 로보틱스 데이터셋 구축에서
+    필요한 데이터 거버넌스 지표의 작은 프로토타입이다.
+    """
+    now = time.time()
+    records = records_from_agv_snapshot(snapshot()["agvs"], now)
+    return JSONResponse(QUALITY.evaluate(records).as_dict())
+
+
 @app.get("/metrics")
 def metrics():
     """Prometheus 텍스트 포맷 메트릭 — 운영 모니터링(Grafana 등) 표준 연동점.
@@ -262,6 +277,8 @@ def metrics():
         g("fab_agv_maintenance_due", "정비 필요(건전도<55) AGV 수", s["maint_due"]),
         g("fab_fleet_avg_health", "플릿 평균 건전도(0~100)", s["avg_health"]),
         g("fab_events_stored", "시계열 스토어 적재 이벤트 수", st["total"]),
+        g("fab_data_qa_pass_rate", "로보틱스 데이터 QA 통과율(0~1)",
+          QUALITY.evaluate(records_from_agv_snapshot(snapshot()["agvs"], time.time())).as_dict()["qa_pass_rate"]),
         g("fab_fleet_availability", "플릿 가용도(0~1)", rel["availability"]),
         g("fab_fleet_mttr_seconds", "평균 복구 시간(초)", rel["mttr"]),
         g("fab_fleet_mtbf_seconds", "평균 고장 간격(초)", rel["mtbf"] if rel["mtbf"] is not None else 0),

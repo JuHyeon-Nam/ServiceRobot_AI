@@ -15,6 +15,8 @@
 
 **모델 2.8MB · 추론 1ms · GPU 불필요 · CPU 단독 동작 · 태블릿 조작 3D 디지털 트윈 관제 · Docker 한 줄 배포**
 
+**For reviewers / research contact:** [교수 컨택용 연구 브리프](docs/professor_contact_brief.md) · [매일 개발 스프린트](docs/daily_sprint_plan.md)
+
 <br>
 
 ### 🧊 태블릿으로 조작하는 실시간 3D 디지털 트윈 관제 (`/twin`)
@@ -38,6 +40,7 @@ _3개 층 팹을 3D로 — AGV·설비를 실시간 AI 진단, 이상 발생 시
 | **모델** | LightGBM (native txt, **2.8MB**) — 시계열을 2D로 압축해 트리 모델로 초고속 추론 |
 | **성능** | **공식 Validation(처음 보는 로봇) 93.4%** · 관행적 랜덤분할 환산 **97.7%** (아래 표 참고) |
 | **서빙** | FastAPI 추론 API (`/predict`, `/health`) — 입력 검증·지연 0.01초 |
+| **데이터 QA** | 로보틱스 학습 데이터 스키마·어노테이션·QA 지표 (`/api/data-quality`) |
 | **개발** | 1인 풀스택 (데이터 파이프라인 → 모델링 → API 서빙 → 평가 전 과정) |
 
 ---
@@ -181,6 +184,7 @@ flowchart LR
 | **반출(export)** | `/api/history?agv=…&fmt=csv` — **CSV 다운로드**(리포팅·엑셀 연계), 설비 패널에 `CSV ↓` 버튼 |
 | **신뢰성 지표(reliability)** | `/api/reliability` — 이벤트 스트림에서 고장 에피소드를 복원해 **MTBF·MTTR·가용도(Availability)** 계산 (신뢰성 공학 지표), 최저 가용도 설비 Top5 |
 | **모니터링(observability)** | `/metrics` — **Prometheus 텍스트 포맷** 게이지(플릿 KPI·적재량·가용도·MTBF/MTTR) → Grafana 등 표준 모니터링 스택에 바로 연동 |
+| **데이터 QA(governance)** | `/api/data-quality` — 로보틱스 학습 데이터 레코드의 **스키마 정합성·어노테이션 커버리지·QA 통과율·적재 성공률·재처리율** 계산 |
 | **보존(retention)** | `max_rows` 초과분 자동 삭제(오래된 이벤트 prune) |
 | **저장소** | 기본 인메모리(세션 누적) · 환경변수 `TELEMETRY_DB=경로` 지정 시 파일로 durable |
 
@@ -263,7 +267,8 @@ docker build -t servicerobot-ai . && docker run -p 8000:8000 servicerobot-ai
 # → http://127.0.0.1:8000/twin
 
 # 0) 환경 (로컬 개발)
-python -m venv venv && source venv/Scripts/activate   # Windows: venv\Scripts\activate
+python -m venv venv
+source venv/bin/activate      # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 # 추론·시연 — 데이터·학습 불필요 (모델·재생데이터가 repo에 포함)
@@ -355,6 +360,7 @@ POST /predict
 - [x] **시계열 분석 계층** — 시간 버킷 다운샘플링(`/api/trend`) + 관제 HUD **플릿 추이 차트** + 설비 패널 **이벤트 이력·CSV 반출**
 - [x] **신뢰성 지표 + 운영 모니터링** — 고장 에피소드 복원 기반 **MTBF·MTTR·가용도**(`/api/reliability`) + **Prometheus `/metrics`**(Grafana 연동점)
 - [x] **Docker 패키징** — `docker run` 한 줄 배포(경량 서버 이미지) + **CI에서 빌드·컨테이너 스모크 테스트 자동 검증**
+- [x] **로보틱스 데이터 QA/거버넌스 지표** — `/api/data-quality`: 스키마 정합성·어노테이션 커버리지·QA 통과율·적재 성공률·재처리율
 - [ ] **MQTT 수집 + 외부 시계열DB 연동** — 엣지 브로커 → 스트림 적재 확장
 - [ ] **피처 중요도·혼동행렬 시각화** 이미지 README 첨부
 - [ ] **ONNX 변환** — 엣지/모바일/타 언어 추론 확장
@@ -377,14 +383,14 @@ POST /predict
 
 ## 👨‍💻 My Contribution (남주현 기여도)
 
-이 프로젝트에서 **데이터 파이프라인 구축 및 실시간 추론 아키텍처 최적화**를 전담하여 최종 정확도 95.91% 달성에 기여했습니다.
+이 프로젝트에서 **데이터 파이프라인 구축 및 실시간 추론 아키텍처 최적화**를 전담했습니다. 공식 Validation split 기준 **93.4%**(처음 보는 로봇 평가), 관행적 랜덤분할 기준 **97.7%**를 구분해 기록하여 실배포 일반화 성능과 비교용 성능을 함께 제시했습니다.
 
 *   **초고속 추론을 위한 차원 압축 (3D → 2D Flatten)**
     *   30시점 연속 시퀀스를 RNN 계열로 처리할 때 발생하는 실시간 관제 서버의 연산 과부하 문제를 해결하기 위해, 시계열을 2D 평면으로 Flatten하고 경량 트리 기반 **LightGBM**을 도입하여 0.01초 내 초고속 추론 환경을 구현했습니다.
 *   **도메인 맞춤형 피처 엔지니어링**
     *   차원 압축 과정에서 유실된 시간 흐름 데이터를 보완하기 위해 장기 고장용 **추세선(Drift) 피처**와 미세 진동 감지용 **FFT(고속 푸리에 변환) 주파수 피처**를 직접 수학적으로 추출 및 주입하여 고장 예측률을 정체기에서 돌파시켰습니다.
-*   **극단적 데이터 불균형 제어 및 임계값 최적화**
-    *   희귀 고장 데이터(107건)와 정상 데이터(20만 건) 간의 극단적인 불균형을 해결하고자, **Optuna** 튜닝 기반의 다수 클래스 집중형(Majority Focus) 전략을 수립하고 결정 임계값을 **35%**로 최적화하여 오보 리스크를 최소화하고 재현율(Recall)을 극대화했습니다.
+*   **극단적 데이터 불균형 제어**
+    *   정상 데이터가 압도적으로 많은 불균형 구조에서 SMOTE 적용 시 성능이 붕괴되는 것을 확인하고, 정상 클래스를 에러 총합의 3배로 언더샘플링하는 지점이 정확도와 macro-F1의 균형을 가장 잘 만든다는 것을 실험으로 확인했습니다.
 *   **데이터 본질적 한계의 수학적 증명 (EDA)**
     *   특정 희귀 고장(Class 6)이 정상 데이터의 노이즈 범위와 완벽히 중첩됨을 EDA로 증명하여, 알고리즘 모델의 한계가 아닌 센서 자체의 물리적 한계임을 규명하고 차기 이기종 센서 도입의 논리적 근거를 마련했습니다.
 

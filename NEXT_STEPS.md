@@ -44,12 +44,18 @@ cd src && uvicorn realtime_server:app --reload   # http://127.0.0.1:8000
 
 ---
 
-## STEP 2 — Docker 패키징
-**목표:** `docker compose up` 한 줄로 API+대시보드 실행.
+## STEP 2 — Docker 패키징 ✅ 기본 구현 완료
+**구현됨:** `Dockerfile` + 서버 전용 `requirements-server.txt`로 관제 서버 이미지를 만들고, CI가 매 push마다 빌드·컨테이너 기동·엔드포인트 스모크 테스트를 수행.
+
+```bash
+docker build -t servicerobot-ai . && docker run -p 8000:8000 servicerobot-ai
+```
+
+**다음 고도화:** `docker-compose.yml`을 추가해 API/관제/모니터링을 더 명확히 분리.
 
 **어떻게:**
-1. `Dockerfile` (python:3.11-slim 베이스, requirements 설치).
-2. `docker-compose.yml` — api(FastAPI) + dashboard(Streamlit) 두 서비스.
+1. `docker-compose.yml` — api(FastAPI) + optional monitoring service.
+2. `TELEMETRY_DB` volume mount로 이벤트 이력 durable 처리.
 3. README에 `docker compose up` 실행법 추가.
 
 **왜:** "배포까지 안다"는 신호 + 어느 환경에서도 동일 실행(재현성).
@@ -57,39 +63,39 @@ cd src && uvicorn realtime_server:app --reload   # http://127.0.0.1:8000
 
 ---
 
-## STEP 3 — 모델 설명가능성 (SHAP)
-**목표:** "왜 배터리 저하라고 판단했나"의 근거를 보여줌.
+## STEP 3 — 모델 설명가능성 ✅ 기본 구현 완료
+**구현됨:** `/predict`가 LightGBM contribution 기반 진단 근거 Top3를 반환하고, 관제 패널은 물리 신호 기반 원인 문구를 함께 표시.
 
-**어떻게:**
-1. `pip install shap`, `shap.TreeExplainer(booster)`.
-2. 예측 1건의 기여 피처 Top3를 추출(`distance ↑`, `batteryUse ↑` 등).
-3. `app.py` 응답과 대시보드 경고에 "근거: distance↑, batteryUse↑" 표시.
+**다음 고도화:**
+1. 설명 결과를 모델 카드에 정리.
+2. 정상/고장 샘플별 Top feature 비교표 추가.
+3. 센서 한계 구간의 설명가능성 실패 사례를 별도 문서화.
 
 **왜:** PdM에서 "왜"는 핵심. AI를 블랙박스로 안 쓴다는 깊이.
 **난이도:** 중 · **예상:** 2~3일
 
 ---
 
-## STEP 4 — DB 연동 (이력·감사)
-**목표:** 센서 이력·예측·알림을 저장하고 조회.
+## STEP 4 — DB 연동 (이력·감사) ✅ 기본 구현 완료
+**구현됨:** `telemetry_store.py`가 SQLite 기반으로 진단 이벤트를 선별 적재하고, `/api/stats`, `/api/history`, `/api/trend`, CSV export를 제공.
 
-**어떻게:**
-1. SQLite(간단) 또는 PostgreSQL/TimescaleDB(시계열 특화).
-2. `SQLAlchemy` 모델: `readings`, `predictions`, `alerts` 테이블.
-3. `app.py`가 매 예측을 INSERT, 대시보드에 "최근 알림 이력" 조회 패널 추가.
+**다음 고도화:**
+1. InfluxDB 또는 TimescaleDB 확장 설계 문서화.
+2. MQTT 수집 이벤트와 동일 인터페이스로 연결.
+3. 장기 보존/다운샘플링 정책을 모델 카드에 명시.
 
 **왜:** 데이터 엔지니어 차원 추가(수집→저장→조회 파이프라인).
 **난이도:** 중 · **예상:** 2~4일
 
 ---
 
-## STEP 5 — 견고함 (테스트 · CI)
-**목표:** 코드 신뢰성 + 깃허브 자동 검증 배지.
+## STEP 5 — 견고함 (테스트 · CI) ✅ 기본 구현 완료
+**구현됨:** pytest contract tests와 GitHub Actions CI가 push/PR마다 실행. Docker 이미지 빌드와 컨테이너 smoke test도 CI에 포함.
 
-**어떻게:**
-1. `tests/` — `pytest`로 `create_features` 차원·`/predict` 응답 형태 검증.
-2. `.github/workflows/ci.yml` — push 시 테스트 자동 실행.
-3. README에 CI 배지 추가.
+**다음 고도화:**
+1. 실제 모델 메타파일과 README 수치 정합성 테스트.
+2. API schema snapshot test.
+3. Docker compose smoke test.
 
 **왜:** 협업·실무 역량 신호. 적은 노력 대비 신뢰도↑.
 **난이도:** 하 · **예상:** 1~2일
@@ -110,4 +116,4 @@ cd src && uvicorn realtime_server:app --reload   # http://127.0.0.1:8000
 3. 각 STEP 끝나면 README 로드맵 체크박스 갱신 + 필요한 시각화/스크린샷 추가.
 4. 막히면: 해당 STEP만 떼어내 작은 예제로 먼저 동작 확인 → 본 프로젝트에 통합.
 
-**추천 순서:** STEP 1(실시간) → STEP 2(Docker) → STEP 3(SHAP). 이 셋이면 "완성도 높은 실시간 AI 시스템"으로 충분.
+**추천 순서:** 이제는 기능 추가보다 [교수 컨택용 연구 브리프](docs/professor_contact_brief.md), 모델 카드, 센서 한계 분석, MQTT/시계열DB 확장 설계처럼 "연구 적합성을 설명하는 문서"를 우선한다.

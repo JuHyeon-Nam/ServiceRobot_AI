@@ -244,7 +244,7 @@ def test_reliability_and_prometheus_endpoints(client):
     m = client.get("/metrics")
     assert m.status_code == 200 and "text/plain" in m.headers["content-type"]
     for name in ("fab_agv_total", "fab_fleet_avg_health", "fab_events_stored",
-                 "fab_fleet_availability", "fab_fleet_mttr_seconds"):
+                 "fab_data_qa_pass_rate", "fab_fleet_availability", "fab_fleet_mttr_seconds"):
         assert f"# TYPE {name} gauge" in m.text and f"\n{name} " in m.text, f"{name} 메트릭 누락"
 
 
@@ -258,3 +258,14 @@ def test_trend_endpoint_and_csv_export(client):
     assert r.status_code == 200
     assert "text/csv" in r.headers["content-type"]
     assert r.text.splitlines()[0] == "ts,pred,conf,level,health,vib,batt,temp"
+
+
+def test_data_quality_endpoint(client):
+    """로보틱스 학습 데이터셋 QA/거버넌스 지표 계약."""
+    q = client.get("/api/data-quality").json()
+    for key in ("total", "schema_valid_rate", "annotation_coverage", "qa_pass_rate",
+                "ingest_success_rate", "rework_rate", "by_modality", "issues"):
+        assert key in q
+    assert q["total"] > 0
+    assert 0 <= q["schema_valid_rate"] <= 1
+    assert 0 <= q["qa_pass_rate"] <= 1
