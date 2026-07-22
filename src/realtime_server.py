@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 import fab_layout as FL
 from telemetry_store import TelemetryStore
 from dataset_quality import RoboticsDataQualityMonitor, records_from_agv_snapshot
+from drift_monitor import DataDriftMonitor
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(_HERE, "..", "data", "processed")
@@ -150,6 +151,7 @@ P = {"v": 0.0}     # 전역 진행도(0~1 순환)
 # 시계열 데이터 계층(진단 이벤트 적재/집계/조회). 기본 인메모리, TELEMETRY_DB로 파일 durable.
 STORE = TelemetryStore(os.environ.get("TELEMETRY_DB", ":memory:"))
 QUALITY = RoboticsDataQualityMonitor()
+DRIFT = DataDriftMonitor()
 
 
 def snapshot():
@@ -262,13 +264,26 @@ def api_data_quality():
     return JSONResponse(QUALITY.evaluate(records).as_dict())
 
 
+@app.get("/api/drift")
+def api_drift():
+    """실시간 입력 분포 드리프트 감지.
+
+    현재 AGV 텔레메트리(vibration/battery/temperature/health/confidence)와
+    경고율을 기준 운전 프로파일과 비교해, 학습·검증 때 기대한 operating envelope에서
+    벗어나는지 feature-level z-score로 감시한다.
+    """
+    return JSONResponse(DRIFT.evaluate(snapshot()["agvs"]))
+
+
 @app.get("/metrics")
 def metrics():
     """Prometheus 텍스트 포맷 메트릭 — 운영 모니터링(Grafana 등) 표준 연동점.
     관제 KPI·데이터 계층·신뢰성 지표를 게이지로 노출한다."""
-    s = snapshot()["kpi"]
+    snap = snapshot()
+    s = snap["kpi"]
     st = STORE.stats()
     rel = STORE.reliability(n_total=len(PLAN))
+    drift = DRIFT.evaluate(snap["agvs"])
     g = lambda name, help_, val: (f"# HELP {name} {help_}\n# TYPE {name} gauge\n{name} {val}")
     lines = [
         g("fab_agv_total", "가동 AGV 수", s["total"]),
@@ -278,7 +293,10 @@ def metrics():
         g("fab_fleet_avg_health", "플릿 평균 건전도(0~100)", s["avg_health"]),
         g("fab_events_stored", "시계열 스토어 적재 이벤트 수", st["total"]),
         g("fab_data_qa_pass_rate", "로보틱스 데이터 QA 통과율(0~1)",
-          QUALITY.evaluate(records_from_agv_snapshot(snapshot()["agvs"], time.time())).as_dict()["qa_pass_rate"]),
+          QUALITY.evaluate(records_from_agv_snapshot(snap["agvs"], time.time())).as_dict()["qa_pass_rate"]),
+        g("fab_data_drift_score", "실시간 입력 분포 드리프트 점수(max absolute z-score)", drift["score"]),
+        g("fab_data_drift_features", "드리프트 상태인 feature 수", len(drift["drifted_features"])),
+        g("fab_data_drift_fault_rate", "현재 스냅샷 이상 AGV 비율", drift["fault_rate"]["current"]),
         g("fab_fleet_availability", "플릿 가용도(0~1)", rel["availability"]),
         g("fab_fleet_mttr_seconds", "평균 복구 시간(초)", rel["mttr"]),
         g("fab_fleet_mtbf_seconds", "평균 고장 간격(초)", rel["mtbf"] if rel["mtbf"] is not None else 0),

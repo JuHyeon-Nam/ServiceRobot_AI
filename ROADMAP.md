@@ -40,7 +40,8 @@
 - [x] C1 테스트 보강(서버 스냅샷·레이아웃 계약) + **GitHub Actions CI**(push마다 pytest 자동 실행 + README 배지) ✅
 - [ ] C2 Docker `compose up` 한 줄 실행
 - [ ] C3 데모 영상 2~3분 + README 직무 키워드 정렬
-- [ ] C4 (스트레치) MQTT 수집-추론 분리 / 시계열 DB 이력
+- [x] C4 데이터 드리프트 감지 — 실시간 입력 분포를 기준 운전 프로파일과 비교(`/api/drift`, Prometheus 게이지) ✅
+- [ ] C5 (스트레치) MQTT 수집-추론 분리 / 외부 시계열DB 이력
 
 ---
 

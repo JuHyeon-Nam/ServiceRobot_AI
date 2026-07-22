@@ -41,6 +41,7 @@ _3개 층 팹을 3D로 — AGV·설비를 실시간 AI 진단, 이상 발생 시
 | **성능** | **공식 Validation(처음 보는 로봇) 93.4%** · 관행적 랜덤분할 환산 **97.7%** (아래 표 참고) |
 | **서빙** | FastAPI 추론 API (`/predict`, `/health`) — 입력 검증·지연 0.01초 |
 | **데이터 QA** | 로보틱스 학습 데이터 스키마·어노테이션·QA 지표 (`/api/data-quality`) |
+| **AI 운영 모니터링** | 실시간 입력 분포 드리프트 감지 (`/api/drift`) + Prometheus 게이지 |
 | **개발** | 1인 풀스택 (데이터 파이프라인 → 모델링 → API 서빙 → 평가 전 과정) |
 
 ---
@@ -185,6 +186,7 @@ flowchart LR
 | **신뢰성 지표(reliability)** | `/api/reliability` — 이벤트 스트림에서 고장 에피소드를 복원해 **MTBF·MTTR·가용도(Availability)** 계산 (신뢰성 공학 지표), 최저 가용도 설비 Top5 |
 | **모니터링(observability)** | `/metrics` — **Prometheus 텍스트 포맷** 게이지(플릿 KPI·적재량·가용도·MTBF/MTTR) → Grafana 등 표준 모니터링 스택에 바로 연동 |
 | **데이터 QA(governance)** | `/api/data-quality` — 로보틱스 학습 데이터 레코드의 **스키마 정합성·어노테이션 커버리지·QA 통과율·적재 성공률·재처리율** 계산 |
+| **데이터 드리프트(data drift)** | `/api/drift` — 실시간 `vib/batt/temp/health/conf`와 이상 비율을 기준 운전 프로파일과 비교해 **feature-level z-score·watch/drift 등급·재보정 권고** 산출 |
 | **보존(retention)** | `max_rows` 초과분 자동 삭제(오래된 이벤트 prune) |
 | **저장소** | 기본 인메모리(세션 누적) · 환경변수 `TELEMETRY_DB=경로` 지정 시 파일로 durable |
 
@@ -361,6 +363,7 @@ POST /predict
 - [x] **신뢰성 지표 + 운영 모니터링** — 고장 에피소드 복원 기반 **MTBF·MTTR·가용도**(`/api/reliability`) + **Prometheus `/metrics`**(Grafana 연동점)
 - [x] **Docker 패키징** — `docker run` 한 줄 배포(경량 서버 이미지) + **CI에서 빌드·컨테이너 스모크 테스트 자동 검증**
 - [x] **로보틱스 데이터 QA/거버넌스 지표** — `/api/data-quality`: 스키마 정합성·어노테이션 커버리지·QA 통과율·적재 성공률·재처리율
+- [x] **데이터 드리프트 감지** — `/api/drift`: 실시간 입력 분포가 기준 운전 프로파일에서 벗어나는지 feature-level z-score·경고 등급·재보정 권고로 감시
 - [ ] **MQTT 수집 + 외부 시계열DB 연동** — 엣지 브로커 → 스트림 적재 확장
 - [ ] **피처 중요도·혼동행렬 시각화** 이미지 README 첨부
 - [ ] **ONNX 변환** — 엣지/모바일/타 언어 추론 확장

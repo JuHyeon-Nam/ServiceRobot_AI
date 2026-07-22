@@ -1,5 +1,6 @@
 # 1. 가상환경 및 파이썬 캐시
 venv/
+.venv/
 __pycache__/
 *.pyc
 

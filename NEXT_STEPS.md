@@ -104,7 +104,7 @@ docker build -t servicerobot-ai . && docker run -p 8000:8000 servicerobot-ai
 
 ## STEP 6 — 욕심내면 (스트레치)
 - **ONNX 변환** — `robot_pdm_enhanced.txt`→ONNX, 엣지/모바일/타 언어 추론 + 지연 벤치마크.
-- **데이터 드리프트 감지** — 입력 분포가 학습과 벌어지면 경고(실서비스 PdM 핵심).
+- ✅ **데이터 드리프트 감지** — `/api/drift`가 실시간 입력 분포와 기준 운전 프로파일을 비교해 watch/drift 등급과 재보정 권고를 반환.
 - **MLflow** — 실험·모델 버전 추적 + 모델 카드.
 - **데모 영상(2~3분)** — 대시보드 시연 녹화, README/이력서에 링크.
 

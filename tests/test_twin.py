@@ -269,3 +269,18 @@ def test_data_quality_endpoint(client):
     assert q["total"] > 0
     assert 0 <= q["schema_valid_rate"] <= 1
     assert 0 <= q["qa_pass_rate"] <= 1
+
+
+def test_data_drift_endpoint_and_metrics(client):
+    """운영 AI 모니터링: 실시간 입력 분포 드리프트 API + Prometheus 게이지 계약."""
+    d = client.get("/api/drift").json()
+    for key in ("status", "score", "window_size", "features", "fault_rate",
+                "drifted_features", "watch_features", "recommendation"):
+        assert key in d
+    assert d["status"] in ("ok", "watch", "drift")
+    assert d["window_size"] > 0
+    assert {"vib", "batt", "temp", "health", "conf"} <= d["features"].keys()
+    assert 0 <= d["fault_rate"]["current"] <= 1
+    m = client.get("/metrics")
+    for name in ("fab_data_drift_score", "fab_data_drift_features", "fab_data_drift_fault_rate"):
+        assert f"# TYPE {name} gauge" in m.text and f"\n{name} " in m.text, f"{name} 메트릭 누락"

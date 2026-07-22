@@ -5,6 +5,7 @@ SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, SRC)
 
 from dataset_quality import RoboticsDataQualityMonitor, records_from_agv_snapshot
+from drift_monitor import DataDriftMonitor
 
 
 def test_quality_monitor_metrics():
@@ -83,3 +84,31 @@ def test_records_from_agv_snapshot():
     assert records[1]["annotation"]["category"] == "fault"
     assert records[1]["qa_status"] == "fail"
 
+
+def test_data_drift_monitor_statuses():
+    monitor = DataDriftMonitor()
+    healthy = []
+    for i in range(6):
+        healthy.append({
+            "id": f"AGV-{i + 1:02d}",
+            "status": "warn" if i == 0 else "ok",  # reference fault rate is about 17%.
+            "conf": 0.86,
+            "health": 88,
+            "sensors": {"vib": 2.2, "batt": 66, "temp": 42},
+        })
+    severe = [
+        {"id": "AGV-01", "status": "warn", "conf": 0.98, "health": 25,
+         "sensors": {"vib": 8.5, "batt": 12, "temp": 68}},
+        {"id": "AGV-02", "status": "warn", "conf": 0.94, "health": 30,
+         "sensors": {"vib": 7.9, "batt": 15, "temp": 66}},
+    ]
+
+    ok = monitor.evaluate(healthy)
+    drift = monitor.evaluate(severe)
+
+    assert ok["status"] == "ok"
+    assert ok["window_size"] == 6
+    assert drift["status"] == "drift"
+    assert "fault_rate" in drift["drifted_features"]
+    assert drift["score"] >= 3
+    assert {"vib", "batt", "temp", "health", "conf"} <= drift["features"].keys()
