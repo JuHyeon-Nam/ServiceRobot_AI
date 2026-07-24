@@ -284,3 +284,12 @@ def test_data_drift_endpoint_and_metrics(client):
     m = client.get("/metrics")
     for name in ("fab_data_drift_score", "fab_data_drift_features", "fab_data_drift_fault_rate"):
         assert f"# TYPE {name} gauge" in m.text and f"\n{name} " in m.text, f"{name} 메트릭 누락"
+
+
+def test_model_card_endpoint(client):
+    """모델 거버넌스: 관제 서버에서도 artifact hash와 피처 계약을 조회할 수 있어야 함."""
+    card = client.get("/api/model-card").json()
+    assert card["model_id"] == "robot-pdm-lightgbm-enhanced"
+    assert card["performance"]["official_validation"]["split"].startswith("AI-Hub official")
+    assert card["feature_engineering"]["contract_ok"] is True
+    assert card["input_contract"]["excluded_dynamic_sensors"] == ["x", "y"]

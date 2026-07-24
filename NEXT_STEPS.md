@@ -67,7 +67,7 @@ docker build -t servicerobot-ai . && docker run -p 8000:8000 servicerobot-ai
 **구현됨:** `/predict`가 LightGBM contribution 기반 진단 근거 Top3를 반환하고, 관제 패널은 물리 신호 기반 원인 문구를 함께 표시.
 
 **다음 고도화:**
-1. 설명 결과를 모델 카드에 정리.
+1. ✅ 설명 결과와 운영 기준을 [모델 카드](docs/MODEL_CARD.md)에 정리.
 2. 정상/고장 샘플별 Top feature 비교표 추가.
 3. 센서 한계 구간의 설명가능성 실패 사례를 별도 문서화.
 
@@ -95,7 +95,8 @@ docker build -t servicerobot-ai . && docker run -p 8000:8000 servicerobot-ai
 **다음 고도화:**
 1. 실제 모델 메타파일과 README 수치 정합성 테스트.
 2. API schema snapshot test.
-3. Docker compose smoke test.
+3. ✅ 모델 artifact SHA256·피처 계약·성능 메타를 `/model-card`, `/api/model-card`로 노출하고 테스트.
+4. Docker compose smoke test.
 
 **왜:** 협업·실무 역량 신호. 적은 노력 대비 신뢰도↑.
 **난이도:** 하 · **예상:** 1~2일

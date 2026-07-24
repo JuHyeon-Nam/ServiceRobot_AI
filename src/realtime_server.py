@@ -22,6 +22,7 @@ import fab_layout as FL
 from telemetry_store import TelemetryStore
 from dataset_quality import RoboticsDataQualityMonitor, records_from_agv_snapshot
 from drift_monitor import DataDriftMonitor
+from model_card import build_model_card
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(_HERE, "..", "data", "processed")
@@ -152,6 +153,7 @@ P = {"v": 0.0}     # 전역 진행도(0~1 순환)
 STORE = TelemetryStore(os.environ.get("TELEMETRY_DB", ":memory:"))
 QUALITY = RoboticsDataQualityMonitor()
 DRIFT = DataDriftMonitor()
+MODEL_CARD = build_model_card(DATA)
 
 
 def snapshot():
@@ -273,6 +275,12 @@ def api_drift():
     벗어나는지 feature-level z-score로 감시한다.
     """
     return JSONResponse(DRIFT.evaluate(snapshot()["agvs"]))
+
+
+@app.get("/api/model-card")
+def api_model_card():
+    """운영 중인 PdM 모델의 artifact hash, 피처 계약, 성능, 운영 기준."""
+    return JSONResponse(MODEL_CARD)
 
 
 @app.get("/metrics")

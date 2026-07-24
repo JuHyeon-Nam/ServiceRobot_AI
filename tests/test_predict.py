@@ -51,6 +51,17 @@ def test_predict_shape_and_reason(client):
         assert {"factor", "impact", "effect"} <= item.keys()
 
 
+def test_model_card_endpoint(client):
+    cli, _ = client
+    r = cli.get("/model-card")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["model_id"] == "robot-pdm-lightgbm-enhanced"
+    assert body["feature_engineering"]["contract_ok"] is True
+    assert len(body["artifact"]["sha256"]) == 64
+    assert "/predict" in body["operations"]["serving_endpoints"]
+
+
 def test_bad_input(client):
     cli, _ = client
     r = cli.post("/predict", json={"window": [[0] * 7] * 10})

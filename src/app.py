@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 import uvicorn
 
 from explain import explain_prediction
+from model_card import build_model_card
 
 DATA = "../data/processed"
 
@@ -27,6 +28,7 @@ def load_booster(path: str) -> lgb.Booster:
 booster = load_booster(f"{DATA}/robot_pdm_enhanced.txt")
 mmeta = json.load(open(f"{DATA}/robot_pdm_enhanced_meta.json", encoding="utf-8"))
 emeta = json.load(open(f"{DATA}/enhanced_meta.json", encoding="utf-8"))
+MODEL_CARD = build_model_card(DATA)
 
 CLASSES = mmeta["classes"]        # 모델 확률열 순서(=정렬된 클래스 인덱스)
 NAMES = mmeta["class_names"]       # 실제 errorCode 문자열
@@ -84,6 +86,11 @@ def root():
 @app.get("/health")
 def health():
     return {"ok": True, "n_features": mmeta["n_features"]}
+
+
+@app.get("/model-card")
+def model_card():
+    return MODEL_CARD
 
 
 @app.post("/predict")
