@@ -15,7 +15,7 @@
 
 **모델 2.8MB · 추론 1ms · GPU 불필요 · CPU 단독 동작 · 태블릿 조작 3D 디지털 트윈 관제 · Docker 한 줄 배포**
 
-**For reviewers / research contact:** [교수 컨택용 연구 브리프](docs/professor_contact_brief.md) · [모델 카드](docs/MODEL_CARD.md) · [매일 개발 스프린트](docs/daily_sprint_plan.md)
+**For reviewers / research contact:** [프로젝트 상태](docs/PROJECT_STATUS.md) · [교수 컨택용 연구 브리프](docs/professor_contact_brief.md) · [모델 카드](docs/MODEL_CARD.md) · [매일 개발 스프린트](docs/daily_sprint_plan.md)
 
 <br>
 
@@ -43,6 +43,7 @@ _3개 층 팹을 3D로 — AGV·설비를 실시간 AI 진단, 이상 발생 시
 | **데이터 QA** | 로보틱스 학습 데이터 스키마·어노테이션·QA 지표 (`/api/data-quality`) |
 | **AI 운영 모니터링** | 실시간 입력 분포 드리프트 감지 (`/api/drift`) + Prometheus 게이지 |
 | **모델 거버넌스** | artifact SHA256·피처 계약·검증 성능·재학습 기준을 담은 [모델 카드](docs/MODEL_CARD.md) (`/model-card`, `/api/model-card`) |
+| **배포** | `docker compose up --build` 한 줄 실행 + SQLite telemetry volume |
 | **개발** | 1인 풀스택 (데이터 파이프라인 → 모델링 → API 서빙 → 평가 전 과정) |
 
 ---
@@ -265,7 +266,12 @@ ServiceRobot_AI/
 ## 💻 실행 방법 (Quick Start)
 
 ```bash
-# ⭐ Docker 한 줄 배포 (관제 서버) — CI가 매 push마다 빌드·스모크 테스트로 검증
+# ⭐ Docker Compose 한 줄 배포 (관제 서버 + durable telemetry volume)
+docker compose up --build
+# → http://127.0.0.1:8000/twin
+# → telemetry 이벤트는 compose volume(telemetry-data)에 SQLite로 유지
+
+# Docker 단일 컨테이너 실행 — CI가 매 push마다 빌드·스모크 테스트로 검증
 docker build -t servicerobot-ai . && docker run -p 8000:8000 servicerobot-ai
 # → http://127.0.0.1:8000/twin
 
@@ -363,6 +369,7 @@ POST /predict
 - [x] **시계열 분석 계층** — 시간 버킷 다운샘플링(`/api/trend`) + 관제 HUD **플릿 추이 차트** + 설비 패널 **이벤트 이력·CSV 반출**
 - [x] **신뢰성 지표 + 운영 모니터링** — 고장 에피소드 복원 기반 **MTBF·MTTR·가용도**(`/api/reliability`) + **Prometheus `/metrics`**(Grafana 연동점)
 - [x] **Docker 패키징** — `docker run` 한 줄 배포(경량 서버 이미지) + **CI에서 빌드·컨테이너 스모크 테스트 자동 검증**
+- [x] **Docker Compose 운영 실행** — `docker compose up --build`: 관제 서버 + `TELEMETRY_DB` durable SQLite volume + healthcheck
 - [x] **로보틱스 데이터 QA/거버넌스 지표** — `/api/data-quality`: 스키마 정합성·어노테이션 커버리지·QA 통과율·적재 성공률·재처리율
 - [x] **데이터 드리프트 감지** — `/api/drift`: 실시간 입력 분포가 기준 운전 프로파일에서 벗어나는지 feature-level z-score·경고 등급·재보정 권고로 감시
 - [x] **모델 카드/모델 거버넌스** — [docs/MODEL_CARD.md](docs/MODEL_CARD.md) + `/model-card`·`/api/model-card`: artifact SHA256, 피처 계약, 성능, 한계, 재학습 트리거 공개

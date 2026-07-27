@@ -51,12 +51,13 @@ cd src && uvicorn realtime_server:app --reload   # http://127.0.0.1:8000
 docker build -t servicerobot-ai . && docker run -p 8000:8000 servicerobot-ai
 ```
 
-**다음 고도화:** `docker-compose.yml`을 추가해 API/관제/모니터링을 더 명확히 분리.
+**다음 고도화:** ✅ `docker-compose.yml`을 추가해 API/관제/모니터링 실행 경로를 더 명확히 분리.
 
 **어떻게:**
-1. `docker-compose.yml` — api(FastAPI) + optional monitoring service.
-2. `TELEMETRY_DB` volume mount로 이벤트 이력 durable 처리.
-3. README에 `docker compose up` 실행법 추가.
+1. ✅ `docker-compose.yml` — FastAPI 관제 서버 서비스.
+2. ✅ `TELEMETRY_DB` volume mount로 이벤트 이력 durable 처리.
+3. ✅ README에 `docker compose up --build` 실행법 추가.
+4. 다음: Docker Compose smoke test를 실제 Docker 환경에서 확인.
 
 **왜:** "배포까지 안다"는 신호 + 어느 환경에서도 동일 실행(재현성).
 **난이도:** 하 · **예상:** 1~2일
