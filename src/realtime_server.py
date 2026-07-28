@@ -23,6 +23,7 @@ from telemetry_store import TelemetryStore
 from dataset_quality import RoboticsDataQualityMonitor, records_from_agv_snapshot
 from drift_monitor import DataDriftMonitor
 from model_card import build_model_card
+from reviewer_brief import build_reviewer_brief
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(_HERE, "..", "data", "processed")
@@ -154,6 +155,7 @@ STORE = TelemetryStore(os.environ.get("TELEMETRY_DB", ":memory:"))
 QUALITY = RoboticsDataQualityMonitor()
 DRIFT = DataDriftMonitor()
 MODEL_CARD = build_model_card(DATA)
+REVIEWER_BRIEF = build_reviewer_brief()
 
 
 def snapshot():
@@ -281,6 +283,12 @@ def api_drift():
 def api_model_card():
     """운영 중인 PdM 모델의 artifact hash, 피처 계약, 성능, 운영 기준."""
     return JSONResponse(MODEL_CARD)
+
+
+@app.get("/api/reviewer-brief")
+def api_reviewer_brief():
+    """포트폴리오 리뷰어용 3분 walkthrough, 직무 매핑, 핵심 증거."""
+    return JSONResponse(REVIEWER_BRIEF)
 
 
 @app.get("/metrics")

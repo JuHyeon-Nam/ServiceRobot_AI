@@ -15,7 +15,7 @@
 
 **모델 2.8MB · 추론 1ms · GPU 불필요 · CPU 단독 동작 · 태블릿 조작 3D 디지털 트윈 관제 · Docker 한 줄 배포**
 
-**For reviewers / research contact:** [프로젝트 상태](docs/PROJECT_STATUS.md) · [교수 컨택용 연구 브리프](docs/professor_contact_brief.md) · [모델 카드](docs/MODEL_CARD.md) · [매일 개발 스프린트](docs/daily_sprint_plan.md)
+**For reviewers / research contact:** [3분 리뷰어 가이드](docs/PORTFOLIO_WALKTHROUGH.md) · [프로젝트 상태](docs/PROJECT_STATUS.md) · [교수 컨택용 연구 브리프](docs/professor_contact_brief.md) · [모델 카드](docs/MODEL_CARD.md) · [매일 개발 스프린트](docs/daily_sprint_plan.md)
 
 <br>
 
@@ -44,6 +44,7 @@ _3개 층 팹을 3D로 — AGV·설비를 실시간 AI 진단, 이상 발생 시
 | **AI 운영 모니터링** | 실시간 입력 분포 드리프트 감지 (`/api/drift`) + Prometheus 게이지 |
 | **모델 거버넌스** | artifact SHA256·피처 계약·검증 성능·재학습 기준을 담은 [모델 카드](docs/MODEL_CARD.md) (`/model-card`, `/api/model-card`) |
 | **배포** | `docker compose up --build` 한 줄 실행 + SQLite telemetry volume |
+| **리뷰어 가이드** | 3분 시연 순서·직무별 증거·면접 포인트 ([문서](docs/PORTFOLIO_WALKTHROUGH.md), `/api/reviewer-brief`) |
 | **개발** | 1인 풀스택 (데이터 파이프라인 → 모델링 → API 서빙 → 평가 전 과정) |
 
 ---
@@ -373,6 +374,7 @@ POST /predict
 - [x] **로보틱스 데이터 QA/거버넌스 지표** — `/api/data-quality`: 스키마 정합성·어노테이션 커버리지·QA 통과율·적재 성공률·재처리율
 - [x] **데이터 드리프트 감지** — `/api/drift`: 실시간 입력 분포가 기준 운전 프로파일에서 벗어나는지 feature-level z-score·경고 등급·재보정 권고로 감시
 - [x] **모델 카드/모델 거버넌스** — [docs/MODEL_CARD.md](docs/MODEL_CARD.md) + `/model-card`·`/api/model-card`: artifact SHA256, 피처 계약, 성능, 한계, 재학습 트리거 공개
+- [x] **포트폴리오 리뷰어 가이드** — [docs/PORTFOLIO_WALKTHROUGH.md](docs/PORTFOLIO_WALKTHROUGH.md) + `/api/reviewer-brief`: 3분 시연 순서, 직무별 증거, 면접 포인트 정리
 - [ ] **MQTT 수집 + 외부 시계열DB 연동** — 엣지 브로커 → 스트림 적재 확장
 - [ ] **피처 중요도·혼동행렬 시각화** 이미지 README 첨부
 - [ ] **ONNX 변환** — 엣지/모바일/타 언어 추론 확장

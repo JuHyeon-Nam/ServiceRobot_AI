@@ -25,9 +25,9 @@ It should show four capabilities in one coherent demo:
 | Reliability, metrics, drift, model card | Done | 100% |
 | Portable deployment | Docker + compose done; local Docker unavailable here for manual run | 85% |
 | Physical/edge realism | MQTT / external TSDB still pending | 45% |
-| Portfolio packaging | README/docs strong; demo video still pending | 75% |
+| Portfolio packaging | Reviewer walkthrough and role mapping done; demo video still pending | 88% |
 
-Overall: **about 85% complete as a portfolio demo**, and **about 70% complete as
+Overall: **about 88% complete as a portfolio demo**, and **about 72% complete as
 a production-like robotics data platform**.
 
 ## What Is Already Demo-Ready
@@ -40,6 +40,7 @@ a production-like robotics data platform**.
 - `/api/data-quality`: robotics dataset QA/governance metrics.
 - `/api/drift`: live data drift monitoring.
 - `/api/model-card`: model artifact hash, feature contract, metrics, limitations.
+- `/api/reviewer-brief`: 3-minute reviewer path, proof points, and role mapping.
 - `/metrics`: Prometheus-compatible monitoring.
 - `docker compose up --build`: one-command deployment entrypoint.
 
@@ -48,13 +49,13 @@ a production-like robotics data platform**.
 | Priority | Work | Why it matters |
 |---|---|---|
 | P1 | Demo video, 2-3 minutes | Makes the project instantly reviewable in portfolio/resume contexts. |
-| P1 | README job-keyword polish | Maps features to data/AI, MLOps, robotics, and semiconductor operations roles. |
+| P1 | README job-keyword polish | Add final resume-style phrasing and badges after video capture. |
 | P2 | MQTT simulator split | Makes ingestion look like a realistic edge-to-cloud architecture. |
 | P2 | External time-series DB design or optional profile | Shows scaling path beyond SQLite. |
 | P3 | True live `booster.predict` in the stream loop | Removes the replay-prediction caveat, useful if physical/edge data is added. |
 
 ## Recommended Next Three Daily Commits
 
-1. `docs(portfolio): add reviewer walkthrough and role mapping`
+1. `docs(demo): add video script and capture checklist`
 2. `feat(edge): add MQTT-style simulator interface`
-3. `docs(demo): add video script and capture checklist`
+3. `docs(portfolio): add resume-ready project bullets`

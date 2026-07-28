@@ -293,3 +293,12 @@ def test_model_card_endpoint(client):
     assert card["performance"]["official_validation"]["split"].startswith("AI-Hub official")
     assert card["feature_engineering"]["contract_ok"] is True
     assert card["input_contract"]["excluded_dynamic_sensors"] == ["x", "y"]
+
+
+def test_reviewer_brief_endpoint(client):
+    """포트폴리오 리뷰어가 3분 안에 볼 경로와 직무 매핑을 API로 제공."""
+    brief = client.get("/api/reviewer-brief").json()
+    assert brief["review_time_minutes"] == 3
+    assert brief["start_here"][0]["path"] == "/twin"
+    assert any(point["claim"] == "MLOps and governance are represented" for point in brief["proof_points"])
+    assert any(role["role"] == "Robotics / Smart Factory Engineer" for role in brief["role_mapping"])
