@@ -40,6 +40,7 @@ _3개 층 팹을 3D로 — AGV·설비를 실시간 AI 진단, 이상 발생 시
 | **모델** | LightGBM (native txt, **2.8MB**) — 시계열을 2D로 압축해 트리 모델로 초고속 추론 |
 | **성능** | **공식 Validation(처음 보는 로봇) 93.4%** · 관행적 랜덤분할 환산 **97.7%** (아래 표 참고) |
 | **서빙** | FastAPI 추론 API (`/predict`, `/health`) — 입력 검증·지연 0.01초 |
+| **실시간 추론** | 3D 트윈 `/api/snapshot`이 AGV별 30틱 센서 윈도우를 합성하고 **LightGBM Booster를 live 호출** (`inference.mode=live_booster`) |
 | **데이터 QA** | 로보틱스 학습 데이터 스키마·어노테이션·QA 지표 (`/api/data-quality`) |
 | **AI 운영 모니터링** | 실시간 입력 분포 드리프트 감지 (`/api/drift`) + Prometheus 게이지 |
 | **모델 거버넌스** | artifact SHA256·피처 계약·검증 성능·재학습 기준을 담은 [모델 카드](docs/MODEL_CARD.md) (`/model-card`, `/api/model-card`) |
@@ -158,7 +159,7 @@ flowchart LR
     B -->|Canvas 렌더| V["AGV 실시간 이동 · 진단색 · 경고 피드 · KPI"]
 ```
 
-- **서버**(`realtime_server.py`): AMHS 트랙 루프를 따라 AGV 위치를 산출하고, 모델 진단을 WebSocket으로 push (`/ws`), 레이아웃 API(`/api/layout`) 제공
+- **서버**(`realtime_server.py`): AMHS 트랙 루프를 따라 AGV 위치를 산출하고, AGV별 30틱 센서 윈도우를 만들어 **LightGBM Booster를 live 호출**한 뒤 WebSocket으로 push (`/ws`), 레이아웃 API(`/api/layout`) 제공
 - **프론트**(`static/index.html`): WebSocket 구독 → Canvas에 AGV를 부드럽게 보간 렌더(코너 추종), 층별 상태·실시간 고장 경고 피드·KPI를 라이브 갱신
 - **공유 레이아웃**(`fab_layout.py`): 층/장비/트랙/AGV 경로의 단일 소스
 
@@ -365,6 +366,7 @@ POST /predict
 - [x] **Streamlit 관제 대시보드** + **FastAPI/WebSocket 실시간 스트리밍 관제**
 - [x] **설명가능성(Explainability)** — `/predict`가 진단 근거(물리 신호 Top3) 반환, LightGBM 내장 SHAP로 경량 유지 + pytest
 - [x] **3D 디지털 트윈** — `/twin`(Three.js): 3개 층·장비·AGV를 3D로, 태블릿 터치 조작 + 탭→실시간 AI 진단, **설비 탭 시 실시간 센서 그래프(진동·배터리·온도) + AI 판단 근거** (`uvicorn realtime_server:app` → http://127.0.0.1:8000/twin )
+- [x] **Live Booster 추론 경로** — `/api/snapshot`: 사전계산 예측 대신 AGV별 합성 센서 윈도우를 LightGBM Booster에 직접 통과, `model_latency_ms`·replay audit 필드·Prometheus inference 지표 노출
 - [x] **자산 건전도 지표(Health Index) + 정비 우선순위** — 순간 분류를 넘어 최근 진단 추세를 종합한 0~100 건전도 점수·정비 트리아지 권고(설비 패널) + 플릿 정비 필요 대수·평균 건전도(KPI)
 - [x] **시계열 데이터 계층** — 진단 이벤트 SQLite 적재·롤업 집계(`/api/stats`)·설비별 이력 조회(`/api/history`)·보존정책 (무설치, 향후 MQTT/시계열DB 확장)
 - [x] **시계열 분석 계층** — 시간 버킷 다운샘플링(`/api/trend`) + 관제 HUD **플릿 추이 차트** + 설비 패널 **이벤트 이력·CSV 반출**

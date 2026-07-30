@@ -45,8 +45,10 @@ then appends static/context features.
 - `E-RBT-N` and `E-RBT-S` have very small validation support, so per-class
   reliability is weaker than headline accuracy.
 - Some faults overlap normal sensor ranges, which can produce missed detections.
-- The live demo stream is replay-based; a physical robot/MQTT feed should be
-  validated before claiming field performance.
+- The live demo uses replay trajectories and deterministic synthetic sensor
+  windows; `/api/snapshot` runs the LightGBM Booster live on each uncached AGV
+  frame, but a physical robot/MQTT feed should still be validated before
+  claiming field performance.
 
 ## Operations
 
@@ -54,6 +56,8 @@ then appends static/context features.
 - Observability endpoints: `/metrics`, `/api/data-quality`, `/api/drift`, `/api/reliability`.
 - Explainability: `/predict` returns LightGBM contribution-based top physical
   signal groups.
+- Live twin inference: `/api/snapshot` exposes `inference.mode=live_booster`,
+  per-AGV model latency, and replay-vs-live audit fields.
 - Drift monitoring: `/api/drift` compares live `vib/batt/temp/health/conf` and
   fault rate against the reference operating profile.
 

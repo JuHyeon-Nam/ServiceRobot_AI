@@ -36,7 +36,7 @@ cd src && uvicorn realtime_server:app --reload   # http://127.0.0.1:8000
 ```
 **다음 고도화(선택):**
 1. `simulator.py` 분리 — 별도 프로세스가 센서를 흘려보내고 서버는 받기만(진짜 수집-추론 분리).
-2. 서버에서 매 tick `booster.predict`를 직접 호출(현재는 사전계산 진단 스트리밍) → 완전 라이브 추론.
+2. ✅ 서버에서 매 tick `booster.predict`를 직접 호출 — `/api/snapshot` live Booster inference + latency/metrics/audit 필드.
 3. **MQTT**(paho-mqtt + mosquitto)로 전송 계층 교체 → 프로필의 *Edge-Cloud/MQTT*와 직결.
 4. 다중 클라이언트 브로드캐스트 + 재접속/백프레셔 처리.
 

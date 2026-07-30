@@ -21,13 +21,14 @@ It should show four capabilities in one coherent demo:
 | Core PdM model and honest validation | Done | 100% |
 | Explainability and feature contract | Done | 100% |
 | 3D digital twin demo | Done | 100% |
+| Live inference in twin stream | Done | 100% |
 | Telemetry storage / history / rollup | Done | 100% |
 | Reliability, metrics, drift, model card | Done | 100% |
 | Portable deployment | Docker + compose done; local Docker unavailable here for manual run | 85% |
 | Physical/edge realism | MQTT / external TSDB still pending | 45% |
 | Portfolio packaging | Reviewer walkthrough and role mapping done; demo video still pending | 88% |
 
-Overall: **about 88% complete as a portfolio demo**, and **about 72% complete as
+Overall: **about 90% complete as a portfolio demo**, and **about 75% complete as
 a production-like robotics data platform**.
 
 ## What Is Already Demo-Ready
@@ -35,6 +36,8 @@ a production-like robotics data platform**.
 - `/twin`: 3D FAB/AGV digital twin with touch navigation and warning highlights.
 - `/ws`: live fleet state stream.
 - `/api/snapshot`: current AGV state and KPI contract.
+- `/api/snapshot` inference block: live LightGBM Booster mode, feature count,
+  latency, call count, and replay audit fields.
 - `/api/history`, `/api/stats`, `/api/trend`: telemetry persistence and analysis.
 - `/api/reliability`: MTBF, MTTR, availability.
 - `/api/data-quality`: robotics dataset QA/governance metrics.
@@ -52,7 +55,7 @@ a production-like robotics data platform**.
 | P1 | README job-keyword polish | Add final resume-style phrasing and badges after video capture. |
 | P2 | MQTT simulator split | Makes ingestion look like a realistic edge-to-cloud architecture. |
 | P2 | External time-series DB design or optional profile | Shows scaling path beyond SQLite. |
-| P3 | True live `booster.predict` in the stream loop | Removes the replay-prediction caveat, useful if physical/edge data is added. |
+| P3 | Physical robot or MQTT-fed sensor windows | Replaces the deterministic simulator windows with a real edge source. |
 
 ## Recommended Next Three Daily Commits
 

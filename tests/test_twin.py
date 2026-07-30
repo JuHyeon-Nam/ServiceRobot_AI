@@ -42,11 +42,27 @@ def test_snapshot_contract(client):
     s = client.get("/api/snapshot").json()
     assert s["type"] == "state"
     assert {"total", "ok", "warn", "per_floor"} <= s["kpi"].keys()
+    assert s["inference"]["mode"] == "live_booster"
+    assert s["inference"]["n_features"] == 249
+    assert s["inference"]["calls"] > 0
     assert s["agvs"], "AGV 목록이 비면 안 됨"
     a = s["agvs"][0]
     for key in ("id", "x", "y", "ang", "floor", "status", "pred", "label", "conf"):
         assert key in a, f"AGV 응답에 {key} 누락 (3D 렌더가 의존)"
     assert a["status"] in ("ok", "warn")
+
+
+def test_live_booster_inference_contract(client):
+    """B1: 3D 트윈 snapshot의 진단은 live LightGBM Booster 경로를 거쳐야 함."""
+    s = client.get("/api/snapshot").json()
+    a = s["agvs"][0]
+    assert a["inference_mode"] == "live_booster"
+    assert isinstance(a["model_latency_ms"], (int, float)) and a["model_latency_ms"] >= 0
+    assert isinstance(a["replay_pred"], str) and "replay_conf" in a
+    assert 0 <= a["conf"] <= 1
+    m = client.get("/metrics").text
+    for name in ("fab_live_inference_calls", "fab_live_inference_latency_ms"):
+        assert f"# TYPE {name} gauge" in m and f"\n{name} " in m
 
 
 def test_agv_sensor_contract(client):

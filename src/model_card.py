@@ -110,13 +110,14 @@ def build_model_card(data_dir: str | Path) -> dict[str, Any]:
             "known_limitations": [
                 "rare classes such as E-RBT-N and E-RBT-S have very small validation support",
                 "some faults overlap normal sensor ranges, so missed detections must be monitored",
-                "the demo stream uses replayed validation windows rather than a physical robot feed",
+                "the demo stream uses replay trajectories and deterministic synthetic sensor windows rather than a physical robot feed",
             ],
         },
         "operations": {
             "serving_endpoints": ["/predict", "/health", "/model-card", "/api/model-card"],
             "observability": ["/metrics", "/api/data-quality", "/api/drift", "/api/reliability"],
             "explainability": "LightGBM contribution-based top physical signal groups returned by /predict",
+            "live_inference": "The 3D twin /api/snapshot path runs the LightGBM Booster on each uncached AGV frame; replay prediction is retained only as an audit hint.",
             "drift_monitoring": {
                 "reference_profile": DEFAULT_REFERENCE_PROFILE,
                 "thresholds": DriftThresholds().__dict__,

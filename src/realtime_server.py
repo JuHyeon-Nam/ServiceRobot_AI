@@ -23,6 +23,7 @@ from telemetry_store import TelemetryStore
 from dataset_quality import RoboticsDataQualityMonitor, records_from_agv_snapshot
 from drift_monitor import DataDriftMonitor
 from model_card import build_model_card
+from pdm_runtime import load_runtime, predict_window, synthesize_live_window
 from reviewer_brief import build_reviewer_brief
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -146,7 +147,7 @@ for rid in robots:
     px, py = g.px.to_numpy(), g.py.to_numpy()
     step = np.r_[0, np.cumsum(np.hypot(np.diff(px), np.diff(py)))]
     TRAJ[rid] = dict(prog=step / (step[-1] + 1e-9), pred=g["pred"].to_numpy(),
-                     conf=g["conf"].to_numpy(), n=len(g))
+                     conf=g["conf"].to_numpy(), n=len(g), deviceType=str(g["deviceType"].iloc[0]))
 PLAN = FL.build_agv_plan(robots)
 LAYOUT = FL.build_layout()
 P = {"v": 0.0}     # 전역 진행도(0~1 순환)
@@ -156,6 +157,47 @@ QUALITY = RoboticsDataQualityMonitor()
 DRIFT = DataDriftMonitor()
 MODEL_CARD = build_model_card(DATA)
 REVIEWER_BRIEF = build_reviewer_brief()
+BOOSTER, MODEL_META, DATASET_META = load_runtime(DATA)
+LIVE_CACHE = {}
+LIVE_INFER = {"calls": 0, "cache_hits": 0, "last_latency_ms": 0.0}
+
+
+def live_diagnosis(a: dict, t: dict, i: int, x: float, y: float, ang: float) -> dict:
+    """Run the actual LightGBM Booster for the current AGV frame.
+
+    Replay prediction remains as a hint for deterministic sensor-window synthesis
+    and as an audit field, but the displayed pred/conf comes from this live call.
+    """
+    replay_pred = str(t["pred"][i])
+    replay_conf = round(float(t["conf"][i]), 3)
+    key = (a["id"], i, replay_pred)
+    if key in LIVE_CACHE:
+        LIVE_INFER["cache_hits"] += 1
+        return LIVE_CACHE[key]
+
+    window, context = synthesize_live_window(
+        seq_idx=i,
+        n_frames=t["n"],
+        device_type=t.get("deviceType", "안내로봇"),
+        pred_hint=replay_pred,
+        x=x,
+        y=y,
+        degree=ang,
+    )
+    result = predict_window(BOOSTER, MODEL_META, DATASET_META, window, context)
+    LIVE_INFER["calls"] += 1
+    LIVE_INFER["last_latency_ms"] = result["latency_ms"]
+    out = {
+        "pred": result["pred"],
+        "conf": round(float(result["conf"]), 3),
+        "latency_ms": result["latency_ms"],
+        "n_features": result["n_features"],
+        "replay_pred": replay_pred,
+        "replay_conf": replay_conf,
+        "context": context,
+    }
+    LIVE_CACHE[key] = out
+    return out
 
 
 def snapshot():
@@ -165,12 +207,14 @@ def snapshot():
         i = int(((p + a.get("toff", 0.0)) % 1.0) * (n - 1))    # AGV별 시점 오프셋 → 고장 분산
         s = (t["prog"][i] + a["phase"]) % 1.0
         x, y, ang = a["route"].at(s)
-        pred = t["pred"][i]; warn = pred != "정상"
+        diag = live_diagnosis(a, t, i, x, y, ang)
+        pred = diag["pred"]; warn = pred != "정상"
         per[a["floor"]] += int(warn)
-        conf = round(float(t["conf"][i]), 3)
+        conf = diag["conf"]
         level = alert_level(conf) if warn else None
         lo = max(0, i - (TREND_W - 1))         # B3: 최근 N틱 진단 추세(0~3 코드)
         trend = [diag_code(t["pred"][k], round(float(t["conf"][k]), 3)) for k in range(lo, i + 1)]
+        trend[-1] = diag_code(pred, conf)       # 현재 셀은 live Booster 진단과 정합
         trend_dir = trend_direction(trend)      # B2: 악화/개선/안정 방향(드리프트 조기 감지)
         health = health_index(trend, conf, warn)         # B4: 자산 건전도 지표(추세 종합)
         advice = maint_advice(health, trend_dir)         # B4: 정비 트리아지 권고
@@ -178,7 +222,9 @@ def snapshot():
                 "floor": a["floor"], "status": "warn" if warn else "ok",
                 "pred": pred, "label": KOR.get(pred, pred), "conf": conf, "level": level,
                 "sensors": agv_sensors(i, n, pred), "cause": CAUSE.get(pred, CAUSE["정상"]),
-                "trend": trend, "trend_dir": trend_dir, "health": health, "advice": advice}
+                "trend": trend, "trend_dir": trend_dir, "health": health, "advice": advice,
+                "inference_mode": "live_booster", "model_latency_ms": diag["latency_ms"],
+                "replay_pred": diag["replay_pred"], "replay_conf": diag["replay_conf"]}
         agvs.append(item)
         if warn:
             alerts.append({"id": a["id"], "label": item["label"], "conf": conf,
@@ -192,6 +238,10 @@ def snapshot():
             "kpi": {"total": len(PLAN), "ok": len(PLAN) - w, "warn": w,
                     "per_floor": per, "by_level": by_level, "deteriorating": deteriorating,
                     "maint_due": maint_due, "avg_health": avg_health},
+            "inference": {"mode": "live_booster", "model_id": MODEL_CARD["model_id"],
+                          "calls": LIVE_INFER["calls"], "cache_hits": LIVE_INFER["cache_hits"],
+                          "last_latency_ms": LIVE_INFER["last_latency_ms"],
+                          "n_features": MODEL_META["n_features"]},
             "alerts": alerts}
 
 
@@ -313,6 +363,9 @@ def metrics():
         g("fab_data_drift_score", "실시간 입력 분포 드리프트 점수(max absolute z-score)", drift["score"]),
         g("fab_data_drift_features", "드리프트 상태인 feature 수", len(drift["drifted_features"])),
         g("fab_data_drift_fault_rate", "현재 스냅샷 이상 AGV 비율", drift["fault_rate"]["current"]),
+        g("fab_live_inference_calls", "실시간 LightGBM Booster 추론 호출 수", LIVE_INFER["calls"]),
+        g("fab_live_inference_cache_hits", "실시간 추론 캐시 적중 수", LIVE_INFER["cache_hits"]),
+        g("fab_live_inference_latency_ms", "최근 live Booster 추론 지연(ms)", LIVE_INFER["last_latency_ms"]),
         g("fab_fleet_availability", "플릿 가용도(0~1)", rel["availability"]),
         g("fab_fleet_mttr_seconds", "평균 복구 시간(초)", rel["mttr"]),
         g("fab_fleet_mtbf_seconds", "평균 고장 간격(초)", rel["mtbf"] if rel["mtbf"] is not None else 0),

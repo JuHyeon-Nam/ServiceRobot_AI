@@ -98,8 +98,8 @@ def build_reviewer_brief() -> dict:
             "2:35-3:00 Open /api/model-card and close with artifact lineage and remaining MQTT/TSDB path.",
         ],
         "current_status": {
-            "portfolio_demo": "88%",
-            "production_like_robotics_data_platform": "72%",
-            "next_best_work": "Record a 2-3 minute demo video and add MQTT-style ingestion split.",
+            "portfolio_demo": "90%",
+            "production_like_robotics_data_platform": "75%",
+            "next_best_work": "Record a 2-3 minute demo video and replace synthetic windows with MQTT-fed sensor windows.",
         },
     }
