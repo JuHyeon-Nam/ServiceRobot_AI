@@ -41,6 +41,7 @@ _3개 층 팹을 3D로 — AGV·설비를 실시간 AI 진단, 이상 발생 시
 | **성능** | **공식 Validation(처음 보는 로봇) 93.4%** · 관행적 랜덤분할 환산 **97.7%** (아래 표 참고) |
 | **서빙** | FastAPI 추론 API (`/predict`, `/health`) — 입력 검증·지연 0.01초 |
 | **실시간 추론** | 3D 트윈 `/api/snapshot`이 AGV별 30틱 센서 윈도우를 합성하고 **LightGBM Booster를 live 호출** (`inference.mode=live_booster`) |
+| **정비 작업지시** | AI 경고·저건전도 AGV를 **P1/P2/P3 작업지시**로 자동 전환 (`/api/work-orders`) |
 | **데이터 QA** | 로보틱스 학습 데이터 스키마·어노테이션·QA 지표 (`/api/data-quality`) |
 | **AI 운영 모니터링** | 실시간 입력 분포 드리프트 감지 (`/api/drift`) + Prometheus 게이지 |
 | **모델 거버넌스** | artifact SHA256·피처 계약·검증 성능·재학습 기준을 담은 [모델 카드](docs/MODEL_CARD.md) (`/model-card`, `/api/model-card`) |
@@ -188,6 +189,7 @@ flowchart LR
 | **조회(query)** | `/api/history?agv=AGV-03&limit=200` — 설비 1대의 진단 시계열(시각·신뢰도·건전도·센서) |
 | **반출(export)** | `/api/history?agv=…&fmt=csv` — **CSV 다운로드**(리포팅·엑셀 연계), 설비 패널에 `CSV ↓` 버튼 |
 | **신뢰성 지표(reliability)** | `/api/reliability` — 이벤트 스트림에서 고장 에피소드를 복원해 **MTBF·MTTR·가용도(Availability)** 계산 (신뢰성 공학 지표), 최저 가용도 설비 Top5 |
+| **작업지시(work order)** | `/api/work-orders` — AI 경고·저건전도 설비를 **P1/P2/P3 정비 작업지시**로 자동 생성, `acknowledged/in_progress/resolved/closed` 상태 추적 |
 | **모니터링(observability)** | `/metrics` — **Prometheus 텍스트 포맷** 게이지(플릿 KPI·적재량·가용도·MTBF/MTTR) → Grafana 등 표준 모니터링 스택에 바로 연동 |
 | **데이터 QA(governance)** | `/api/data-quality` — 로보틱스 학습 데이터 레코드의 **스키마 정합성·어노테이션 커버리지·QA 통과율·적재 성공률·재처리율** 계산 |
 | **데이터 드리프트(data drift)** | `/api/drift` — 실시간 `vib/batt/temp/health/conf`와 이상 비율을 기준 운전 프로파일과 비교해 **feature-level z-score·watch/drift 등급·재보정 권고** 산출 |

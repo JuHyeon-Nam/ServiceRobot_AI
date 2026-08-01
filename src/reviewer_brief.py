@@ -31,8 +31,8 @@ def build_reviewer_brief() -> dict:
             {
                 "step": 3,
                 "title": "Inspect data/AI operations endpoints",
-                "path": "/api/reliability, /api/drift, /api/data-quality, /api/model-card",
-                "look_for": "MTBF/MTTR, data drift, QA metrics, model artifact lineage and feature contract.",
+                "path": "/api/work-orders, /api/reliability, /api/drift, /api/data-quality, /api/model-card",
+                "look_for": "Maintenance work orders, MTBF/MTTR, data drift, QA metrics, model artifact lineage and feature contract.",
             },
             {
                 "step": 4,
@@ -53,6 +53,10 @@ def build_reviewer_brief() -> dict:
             {
                 "claim": "Dashboard is a real control surface",
                 "evidence": "WebSocket state stream, 3D twin, severity triage, health index, alert focus.",
+            },
+            {
+                "claim": "AI diagnosis is tied to maintenance execution",
+                "evidence": "Predicted faults and low-health assets become P1/P2/P3 work orders with status tracking.",
             },
             {
                 "claim": "Data engineering is represented",
@@ -76,7 +80,7 @@ def build_reviewer_brief() -> dict:
             {
                 "role": "Robotics / Smart Factory Engineer",
                 "keywords": ["AGV", "AMHS", "digital twin", "predictive maintenance", "fleet monitoring"],
-                "evidence": ["/twin", "/ws", "/api/snapshot", "fab_layout.py"],
+                "evidence": ["/twin", "/ws", "/api/snapshot", "/api/work-orders", "fab_layout.py"],
             },
             {
                 "role": "Backend / Platform Engineer",
@@ -85,21 +89,21 @@ def build_reviewer_brief() -> dict:
             },
             {
                 "role": "Semiconductor Equipment / Operations",
-                "keywords": ["FAB", "equipment health", "MTBF", "MTTR", "availability", "triage"],
-                "evidence": ["/api/reliability", "/api/history", "/api/trend", "/twin"],
+                "keywords": ["FAB", "equipment health", "MTBF", "MTTR", "availability", "work order"],
+                "evidence": ["/api/work-orders", "/api/reliability", "/api/history", "/api/trend", "/twin"],
             },
         ],
         "demo_script": [
             "0:00-0:20 Run docker compose or uvicorn and open /twin.",
             "0:20-0:55 Show moving AGVs, floors, OHT rails, lift, and severity colors.",
             "0:55-1:30 Click a warning AGV and explain health index, sensors, cause, and event history.",
-            "1:30-2:05 Open /api/reliability and /api/trend to show operational analytics.",
+            "1:30-2:05 Open /api/work-orders, /api/reliability, and /api/trend to show operational analytics.",
             "2:05-2:35 Open /api/drift and /api/data-quality to show AI/data monitoring.",
             "2:35-3:00 Open /api/model-card and close with artifact lineage and remaining MQTT/TSDB path.",
         ],
         "current_status": {
-            "portfolio_demo": "90%",
-            "production_like_robotics_data_platform": "75%",
-            "next_best_work": "Record a 2-3 minute demo video and replace synthetic windows with MQTT-fed sensor windows.",
+            "portfolio_demo": "91%",
+            "production_like_robotics_data_platform": "78%",
+            "next_best_work": "Record a 2-3 minute demo video and add an MQTT-style edge ingestion path.",
         },
     }

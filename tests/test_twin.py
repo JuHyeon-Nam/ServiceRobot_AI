@@ -264,6 +264,24 @@ def test_reliability_and_prometheus_endpoints(client):
         assert f"# TYPE {name} gauge" in m.text and f"\n{name} " in m.text, f"{name} 메트릭 누락"
 
 
+def test_work_order_endpoint_contract(client):
+    """C7: AI 예측 경고를 현장 정비 작업지시(CMMS-style queue)로 전환하는 API 계약."""
+    r = client.get("/api/work-orders")
+    assert r.status_code == 200
+    body = r.json()
+    assert {"summary", "orders"} <= body.keys()
+    assert {"total", "by_status", "by_priority", "open_p1"} <= body["summary"].keys()
+    assert isinstance(body["orders"], list)
+
+    filtered = client.get("/api/work-orders", params={"status": "open", "limit": 5})
+    assert filtered.status_code == 200
+    assert len(filtered.json()["orders"]) <= 5
+
+    m = client.get("/metrics").text
+    for name in ("fab_work_orders_total", "fab_work_orders_open_p1"):
+        assert f"# TYPE {name} gauge" in m and f"\n{name} " in m, f"{name} 메트릭 누락"
+
+
 def test_trend_endpoint_and_csv_export(client):
     """C4: /api/trend 계약 + /api/history CSV 반출(리포팅 연계)."""
     tr = client.get("/api/trend", params={"bucket": 30, "n": 10}).json()

@@ -25,6 +25,7 @@ from drift_monitor import DataDriftMonitor
 from model_card import build_model_card
 from pdm_runtime import load_runtime, predict_window, synthesize_live_window
 from reviewer_brief import build_reviewer_brief
+from work_order_store import WorkOrderStore
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(_HERE, "..", "data", "processed")
@@ -153,6 +154,7 @@ LAYOUT = FL.build_layout()
 P = {"v": 0.0}     # 전역 진행도(0~1 순환)
 # 시계열 데이터 계층(진단 이벤트 적재/집계/조회). 기본 인메모리, TELEMETRY_DB로 파일 durable.
 STORE = TelemetryStore(os.environ.get("TELEMETRY_DB", ":memory:"))
+WORK_ORDERS = WorkOrderStore(os.environ.get("WORK_ORDER_DB", os.environ.get("TELEMETRY_DB", ":memory:")))
 QUALITY = RoboticsDataQualityMonitor()
 DRIFT = DataDriftMonitor()
 MODEL_CARD = build_model_card(DATA)
@@ -253,7 +255,10 @@ async def _advance():
             P["v"] = (P["v"] + 0.0035) % 1.0
             tick += 1
             if tick % 10 == 0:                         # ~2Hz로 진단 이벤트 시계열 적재
-                STORE.record(time.time(), snapshot()["agvs"])
+                now = time.time()
+                snap = snapshot()
+                STORE.record(now, snap["agvs"])
+                WORK_ORDERS.sync_from_snapshot(now, snap["agvs"])
                 if tick % 200 == 0:                    # 주기적 보존정책(오래된 이벤트 정리)
                     STORE.prune()
             await asyncio.sleep(0.05)
@@ -305,6 +310,29 @@ def api_reliability(agv: str = None):
     return JSONResponse(STORE.reliability(agv=agv, n_total=len(PLAN)))
 
 
+@app.get("/api/work-orders")
+def api_work_orders(status: str = None, limit: int = 50):
+    """AI 진단에서 자동 생성된 정비 작업지시 목록(CMMS-style queue)."""
+    snap = snapshot()
+    WORK_ORDERS.sync_from_snapshot(time.time(), snap["agvs"])
+    return JSONResponse({
+        "summary": WORK_ORDERS.summary(),
+        "orders": WORK_ORDERS.list(status=status, limit=min(max(limit, 1), 200)),
+    })
+
+
+@app.post("/api/work-orders/{order_id}/status")
+def api_work_order_status(order_id: str, status: str):
+    """작업지시 상태 변경: open/acknowledged/in_progress/resolved/closed."""
+    try:
+        row = WORK_ORDERS.set_status(order_id, status, time.time())
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    if not row:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    return JSONResponse(row)
+
+
 @app.get("/api/data-quality")
 def api_data_quality():
     """로보틱스 학습 데이터 QA 지표.
@@ -350,6 +378,7 @@ def metrics():
     st = STORE.stats()
     rel = STORE.reliability(n_total=len(PLAN))
     drift = DRIFT.evaluate(snap["agvs"])
+    wo = WORK_ORDERS.summary()
     g = lambda name, help_, val: (f"# HELP {name} {help_}\n# TYPE {name} gauge\n{name} {val}")
     lines = [
         g("fab_agv_total", "가동 AGV 수", s["total"]),
@@ -366,6 +395,8 @@ def metrics():
         g("fab_live_inference_calls", "실시간 LightGBM Booster 추론 호출 수", LIVE_INFER["calls"]),
         g("fab_live_inference_cache_hits", "실시간 추론 캐시 적중 수", LIVE_INFER["cache_hits"]),
         g("fab_live_inference_latency_ms", "최근 live Booster 추론 지연(ms)", LIVE_INFER["last_latency_ms"]),
+        g("fab_work_orders_total", "누적 정비 작업지시 수", wo["total"]),
+        g("fab_work_orders_open_p1", "미해결 P1 긴급 작업지시 수", wo["open_p1"]),
         g("fab_fleet_availability", "플릿 가용도(0~1)", rel["availability"]),
         g("fab_fleet_mttr_seconds", "평균 복구 시간(초)", rel["mttr"]),
         g("fab_fleet_mtbf_seconds", "평균 고장 간격(초)", rel["mtbf"] if rel["mtbf"] is not None else 0),

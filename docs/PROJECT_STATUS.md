@@ -10,7 +10,8 @@ It should show four capabilities in one coherent demo:
 1. **AI PdM model**: diagnose normal + 8 fault states from robot sensor windows.
 2. **Real-time operations UI**: stream AGV state into a 2D/3D control center.
 3. **Data/AI operations layer**: persist telemetry, query history, monitor drift,
-   expose reliability metrics, and document model governance.
+   expose reliability metrics, turn alerts into maintenance work orders, and
+   document model governance.
 4. **Portable deployment**: run the whole demo on another machine with one
    command and no original 4.2GB dataset.
 
@@ -23,12 +24,13 @@ It should show four capabilities in one coherent demo:
 | 3D digital twin demo | Done | 100% |
 | Live inference in twin stream | Done | 100% |
 | Telemetry storage / history / rollup | Done | 100% |
+| Predictive maintenance work orders | Done | 100% |
 | Reliability, metrics, drift, model card | Done | 100% |
 | Portable deployment | Docker + compose done; local Docker unavailable here for manual run | 85% |
 | Physical/edge realism | MQTT / external TSDB still pending | 45% |
-| Portfolio packaging | Reviewer walkthrough and role mapping done; demo video still pending | 88% |
+| Portfolio packaging | Reviewer walkthrough and role mapping done; demo video still pending | 90% |
 
-Overall: **about 90% complete as a portfolio demo**, and **about 75% complete as
+Overall: **about 91% complete as a portfolio demo**, and **about 78% complete as
 a production-like robotics data platform**.
 
 ## What Is Already Demo-Ready
@@ -40,6 +42,8 @@ a production-like robotics data platform**.
   latency, call count, and replay audit fields.
 - `/api/history`, `/api/stats`, `/api/trend`: telemetry persistence and analysis.
 - `/api/reliability`: MTBF, MTTR, availability.
+- `/api/work-orders`: predictive fault / low-health AGVs converted to P1-P3
+  maintenance work orders with status tracking.
 - `/api/data-quality`: robotics dataset QA/governance metrics.
 - `/api/drift`: live data drift monitoring.
 - `/api/model-card`: model artifact hash, feature contract, metrics, limitations.
