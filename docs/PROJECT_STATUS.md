@@ -12,7 +12,9 @@ It should show four capabilities in one coherent demo:
 3. **Data/AI operations layer**: persist telemetry, query history, monitor drift,
    expose reliability metrics, turn alerts into maintenance work orders, and
    document model governance.
-4. **Portable deployment**: run the whole demo on another machine with one
+4. **Edge-to-cloud realism**: expose an MQTT-compatible telemetry contract that
+   can be replaced by a real broker and time-series DB.
+5. **Portable deployment**: run the whole demo on another machine with one
    command and no original 4.2GB dataset.
 
 ## Current Completion
@@ -23,14 +25,15 @@ It should show four capabilities in one coherent demo:
 | Explainability and feature contract | Done | 100% |
 | 3D digital twin demo | Done | 100% |
 | Live inference in twin stream | Done | 100% |
+| MQTT-style edge telemetry contract | Done; real broker still optional | 70% |
 | Telemetry storage / history / rollup | Done | 100% |
 | Predictive maintenance work orders | Done | 100% |
 | Reliability, metrics, drift, model card | Done | 100% |
 | Portable deployment | Docker + compose done; local Docker unavailable here for manual run | 85% |
-| Physical/edge realism | MQTT / external TSDB still pending | 45% |
+| Physical/edge realism | MQTT-style contract done; real broker / external TSDB pending | 60% |
 | Portfolio packaging | Reviewer walkthrough and role mapping done; demo video still pending | 90% |
 
-Overall: **about 91% complete as a portfolio demo**, and **about 78% complete as
+Overall: **about 92% complete as a portfolio demo**, and **about 82% complete as
 a production-like robotics data platform**.
 
 ## What Is Already Demo-Ready
@@ -40,6 +43,8 @@ a production-like robotics data platform**.
 - `/api/snapshot`: current AGV state and KPI contract.
 - `/api/snapshot` inference block: live LightGBM Booster mode, feature count,
   latency, call count, and replay audit fields.
+- `/api/edge-contract`, `/api/edge-events`: MQTT-compatible topic/payload
+  schema and recent edge telemetry message buffer.
 - `/api/history`, `/api/stats`, `/api/trend`: telemetry persistence and analysis.
 - `/api/reliability`: MTBF, MTTR, availability.
 - `/api/work-orders`: predictive fault / low-health AGVs converted to P1-P3
@@ -57,12 +62,12 @@ a production-like robotics data platform**.
 |---|---|---|
 | P1 | Demo video, 2-3 minutes | Makes the project instantly reviewable in portfolio/resume contexts. |
 | P1 | README job-keyword polish | Add final resume-style phrasing and badges after video capture. |
-| P2 | MQTT simulator split | Makes ingestion look like a realistic edge-to-cloud architecture. |
+| P2 | Real MQTT broker bridge | Replaces the in-process edge buffer with a broker subscriber/publisher. |
 | P2 | External time-series DB design or optional profile | Shows scaling path beyond SQLite. |
 | P3 | Physical robot or MQTT-fed sensor windows | Replaces the deterministic simulator windows with a real edge source. |
 
 ## Recommended Next Three Daily Commits
 
 1. `docs(demo): add video script and capture checklist`
-2. `feat(edge): add MQTT-style simulator interface`
+2. `feat(edge): add real MQTT broker bridge`
 3. `docs(portfolio): add resume-ready project bullets`

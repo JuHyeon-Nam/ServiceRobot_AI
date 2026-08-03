@@ -22,6 +22,7 @@ import fab_layout as FL
 from telemetry_store import TelemetryStore
 from dataset_quality import RoboticsDataQualityMonitor, records_from_agv_snapshot
 from drift_monitor import DataDriftMonitor
+from edge_gateway import EdgeGateway, edge_contract
 from model_card import build_model_card
 from pdm_runtime import load_runtime, predict_window, synthesize_live_window
 from reviewer_brief import build_reviewer_brief
@@ -155,6 +156,7 @@ P = {"v": 0.0}     # 전역 진행도(0~1 순환)
 # 시계열 데이터 계층(진단 이벤트 적재/집계/조회). 기본 인메모리, TELEMETRY_DB로 파일 durable.
 STORE = TelemetryStore(os.environ.get("TELEMETRY_DB", ":memory:"))
 WORK_ORDERS = WorkOrderStore(os.environ.get("WORK_ORDER_DB", os.environ.get("TELEMETRY_DB", ":memory:")))
+EDGE = EdgeGateway(max_messages=int(os.environ.get("EDGE_BUFFER_SIZE", "1000")))
 QUALITY = RoboticsDataQualityMonitor()
 DRIFT = DataDriftMonitor()
 MODEL_CARD = build_model_card(DATA)
@@ -259,6 +261,7 @@ async def _advance():
                 snap = snapshot()
                 STORE.record(now, snap["agvs"])
                 WORK_ORDERS.sync_from_snapshot(now, snap["agvs"])
+                EDGE.publish_snapshot(now, snap["agvs"])
                 if tick % 200 == 0:                    # 주기적 보존정책(오래된 이벤트 정리)
                     STORE.prune()
             await asyncio.sleep(0.05)
@@ -308,6 +311,24 @@ def api_trend(bucket: int = 60, n: int = 15):
 def api_reliability(agv: str = None):
     """신뢰성 지표(MTBF·MTTR·가용도) — 설비 1대(agv=) 또는 플릿 전체(worst 5 포함)."""
     return JSONResponse(STORE.reliability(agv=agv, n_total=len(PLAN)))
+
+
+@app.get("/api/edge-contract")
+def api_edge_contract():
+    """MQTT-style edge telemetry topic/payload contract."""
+    return JSONResponse(edge_contract())
+
+
+@app.get("/api/edge-events")
+def api_edge_events(limit: int = 50, topic_prefix: str = None):
+    """최근 edge-to-cloud 메시지 버퍼. 실제 MQTT 브로커 연결 전 토픽/스키마 검증용."""
+    now = time.time()
+    snap = snapshot()
+    EDGE.publish_snapshot(now, snap["agvs"])
+    return JSONResponse({
+        "summary": EDGE.summary(),
+        "events": EDGE.recent(limit=min(max(limit, 1), 200), topic_prefix=topic_prefix),
+    })
 
 
 @app.get("/api/work-orders")
@@ -379,6 +400,7 @@ def metrics():
     rel = STORE.reliability(n_total=len(PLAN))
     drift = DRIFT.evaluate(snap["agvs"])
     wo = WORK_ORDERS.summary()
+    edge = EDGE.summary()
     g = lambda name, help_, val: (f"# HELP {name} {help_}\n# TYPE {name} gauge\n{name} {val}")
     lines = [
         g("fab_agv_total", "가동 AGV 수", s["total"]),
@@ -395,6 +417,10 @@ def metrics():
         g("fab_live_inference_calls", "실시간 LightGBM Booster 추론 호출 수", LIVE_INFER["calls"]),
         g("fab_live_inference_cache_hits", "실시간 추론 캐시 적중 수", LIVE_INFER["cache_hits"]),
         g("fab_live_inference_latency_ms", "최근 live Booster 추론 지연(ms)", LIVE_INFER["last_latency_ms"]),
+        g("fab_edge_messages_total", "누적 edge telemetry 메시지 수", edge["total_messages"]),
+        g("fab_edge_buffered_messages", "edge telemetry 버퍼 메시지 수", edge["buffered_messages"]),
+        g("fab_edge_active_topics", "활성 edge telemetry 토픽 수", edge["active_topics"]),
+        g("fab_edge_invalid_messages", "스키마 검증 실패 edge telemetry 메시지 수", edge["invalid_messages"]),
         g("fab_work_orders_total", "누적 정비 작업지시 수", wo["total"]),
         g("fab_work_orders_open_p1", "미해결 P1 긴급 작업지시 수", wo["open_p1"]),
         g("fab_fleet_availability", "플릿 가용도(0~1)", rel["availability"]),

@@ -53,11 +53,13 @@ then appends static/context features.
 ## Operations
 
 - Serving endpoints: `/predict`, `/health`, `/model-card`, `/api/model-card`.
-- Observability endpoints: `/metrics`, `/api/data-quality`, `/api/drift`, `/api/reliability`, `/api/work-orders`.
+- Observability endpoints: `/metrics`, `/api/edge-contract`, `/api/edge-events`, `/api/data-quality`, `/api/drift`, `/api/reliability`, `/api/work-orders`.
 - Explainability: `/predict` returns LightGBM contribution-based top physical
   signal groups.
 - Live twin inference: `/api/snapshot` exposes `inference.mode=live_booster`,
   per-AGV model latency, and replay-vs-live audit fields.
+- Edge telemetry: `/api/edge-contract` and `/api/edge-events` expose the
+  MQTT-compatible topic/payload contract for AGV sensor and diagnosis frames.
 - Maintenance actions: `/api/work-orders` converts predicted faults and low
   health-index assets into P1/P2/P3 work orders with operator status tracking.
 - Drift monitoring: `/api/drift` compares live `vib/batt/temp/health/conf` and

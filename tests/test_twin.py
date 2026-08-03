@@ -282,6 +282,30 @@ def test_work_order_endpoint_contract(client):
         assert f"# TYPE {name} gauge" in m and f"\n{name} " in m, f"{name} 메트릭 누락"
 
 
+def test_edge_gateway_endpoint_contract(client):
+    """C8: MQTT-style edge telemetry 토픽/스키마/최근 메시지 API 계약."""
+    contract = client.get("/api/edge-contract").json()
+    assert contract["transport"] == "mqtt-compatible-json"
+    assert "{floor}" in contract["topic_pattern"] and "{agv_id}" in contract["topic_pattern"]
+    assert "sensors" in contract["payload_required"]
+
+    r = client.get("/api/edge-events", params={"limit": 5})
+    assert r.status_code == 200
+    body = r.json()
+    assert {"summary", "events"} <= body.keys()
+    assert body["summary"]["schema"] == contract["schema"]
+    assert body["events"] and len(body["events"]) <= 5
+    event = body["events"][0]
+    assert event["topic"].startswith("factory/demo-fab/floor/")
+    assert event["validation"]["ok"] is True
+    assert {"asset_id", "sensors", "diagnosis", "health", "source"} <= event["payload"].keys()
+
+    m = client.get("/metrics").text
+    for name in ("fab_edge_messages_total", "fab_edge_buffered_messages",
+                 "fab_edge_active_topics", "fab_edge_invalid_messages"):
+        assert f"# TYPE {name} gauge" in m and f"\n{name} " in m, f"{name} 메트릭 누락"
+
+
 def test_trend_endpoint_and_csv_export(client):
     """C4: /api/trend 계약 + /api/history CSV 반출(리포팅 연계)."""
     tr = client.get("/api/trend", params={"bucket": 30, "n": 10}).json()

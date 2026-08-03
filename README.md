@@ -41,6 +41,7 @@ _3개 층 팹을 3D로 — AGV·설비를 실시간 AI 진단, 이상 발생 시
 | **성능** | **공식 Validation(처음 보는 로봇) 93.4%** · 관행적 랜덤분할 환산 **97.7%** (아래 표 참고) |
 | **서빙** | FastAPI 추론 API (`/predict`, `/health`) — 입력 검증·지연 0.01초 |
 | **실시간 추론** | 3D 트윈 `/api/snapshot`이 AGV별 30틱 센서 윈도우를 합성하고 **LightGBM Booster를 live 호출** (`inference.mode=live_booster`) |
+| **엣지 수집 계약** | AGV 텔레메트리를 **MQTT-compatible topic/payload**로 변환 (`/api/edge-contract`, `/api/edge-events`) |
 | **정비 작업지시** | AI 경고·저건전도 AGV를 **P1/P2/P3 작업지시**로 자동 전환 (`/api/work-orders`) |
 | **데이터 QA** | 로보틱스 학습 데이터 스키마·어노테이션·QA 지표 (`/api/data-quality`) |
 | **AI 운영 모니터링** | 실시간 입력 분포 드리프트 감지 (`/api/drift`) + Prometheus 게이지 |
@@ -171,7 +172,7 @@ uvicorn realtime_server:app --reload      # http://127.0.0.1:8000 접속 → 라
 
 #### 🗄️ 시계열 데이터 계층 — 적재 → 집계 → 조회 → 보존 (`telemetry_store.py`)
 
-진단을 화면에 흘려보내고 끝내지 않고, **시계열 데이터로 적재·집계·조회**하는 경량 데이터 파이프라인을 두었습니다. 표준 라이브러리 `sqlite3`만 사용(추가 설치 없음) — 향후 **MQTT 수집 / 외부 시계열DB(InfluxDB·TimescaleDB)** 로 교체해도 동일 인터페이스로 확장됩니다.
+진단을 화면에 흘려보내고 끝내지 않고, **시계열 데이터로 적재·집계·조회**하는 경량 데이터 파이프라인을 두었습니다. 표준 라이브러리 `sqlite3`만 사용(추가 설치 없음) — AGV 스냅샷은 **MQTT-compatible edge message**로도 변환되어 향후 브로커 / 외부 시계열DB(InfluxDB·TimescaleDB)로 확장할 수 있습니다.
 
 ```mermaid
 flowchart LR
@@ -179,11 +180,13 @@ flowchart LR
     S -->|보존정책 prune| S
     S -->|롤업 집계| A["/api/stats<br/>등급별·층별·최다결함·평균건전도"]
     S -->|이력 조회| H["/api/history?agv=…<br/>설비별 진단 시계열"]
+    T -->|topic/payload| E["/api/edge-events<br/>MQTT-style edge buffer"]
 ```
 
 | 요소 | 내용 |
 |---|---|
 | **적재(ingest)** | 매 틱 진단을 2Hz로 샘플, **이상(warn)·저건전도(health<80) 이벤트만 선별 저장**해 저장량 바운드 |
+| **엣지 수집 계약(edge contract)** | `/api/edge-contract`, `/api/edge-events` — AGV별 `factory/demo-fab/floor/{floor}/agv/{agv_id}/telemetry` 토픽과 센서/진단 payload schema를 노출 |
 | **집계(rollup)** | `/api/stats` — 세션 누적 총계·등급별/층별 분포·**최다 결함 AGV Top5**·평균 건전도 |
 | **다운샘플링(time-bucket rollup)** | `/api/trend?bucket=60&n=15` — **시간 버킷별** 이벤트 수·평균 건전도·등급 집계 (시계열DB의 continuous aggregate 개념) → 관제 HUD **플릿 추이 라인차트**의 데이터 소스 |
 | **조회(query)** | `/api/history?agv=AGV-03&limit=200` — 설비 1대의 진단 시계열(시각·신뢰도·건전도·센서) |
@@ -369,6 +372,7 @@ POST /predict
 - [x] **설명가능성(Explainability)** — `/predict`가 진단 근거(물리 신호 Top3) 반환, LightGBM 내장 SHAP로 경량 유지 + pytest
 - [x] **3D 디지털 트윈** — `/twin`(Three.js): 3개 층·장비·AGV를 3D로, 태블릿 터치 조작 + 탭→실시간 AI 진단, **설비 탭 시 실시간 센서 그래프(진동·배터리·온도) + AI 판단 근거** (`uvicorn realtime_server:app` → http://127.0.0.1:8000/twin )
 - [x] **Live Booster 추론 경로** — `/api/snapshot`: 사전계산 예측 대신 AGV별 합성 센서 윈도우를 LightGBM Booster에 직접 통과, `model_latency_ms`·replay audit 필드·Prometheus inference 지표 노출
+- [x] **MQTT-style 엣지 수집 계약** — `/api/edge-contract`, `/api/edge-events`: AGV별 topic/payload schema와 최근 edge message buffer, Prometheus edge ingest 지표
 - [x] **자산 건전도 지표(Health Index) + 정비 우선순위** — 순간 분류를 넘어 최근 진단 추세를 종합한 0~100 건전도 점수·정비 트리아지 권고(설비 패널) + 플릿 정비 필요 대수·평균 건전도(KPI)
 - [x] **시계열 데이터 계층** — 진단 이벤트 SQLite 적재·롤업 집계(`/api/stats`)·설비별 이력 조회(`/api/history`)·보존정책 (무설치, 향후 MQTT/시계열DB 확장)
 - [x] **시계열 분석 계층** — 시간 버킷 다운샘플링(`/api/trend`) + 관제 HUD **플릿 추이 차트** + 설비 패널 **이벤트 이력·CSV 반출**
@@ -379,7 +383,7 @@ POST /predict
 - [x] **데이터 드리프트 감지** — `/api/drift`: 실시간 입력 분포가 기준 운전 프로파일에서 벗어나는지 feature-level z-score·경고 등급·재보정 권고로 감시
 - [x] **모델 카드/모델 거버넌스** — [docs/MODEL_CARD.md](docs/MODEL_CARD.md) + `/model-card`·`/api/model-card`: artifact SHA256, 피처 계약, 성능, 한계, 재학습 트리거 공개
 - [x] **포트폴리오 리뷰어 가이드** — [docs/PORTFOLIO_WALKTHROUGH.md](docs/PORTFOLIO_WALKTHROUGH.md) + `/api/reviewer-brief`: 3분 시연 순서, 직무별 증거, 면접 포인트 정리
-- [ ] **MQTT 수집 + 외부 시계열DB 연동** — 엣지 브로커 → 스트림 적재 확장
+- [ ] **실제 MQTT 브로커 + 외부 시계열DB 연동** — 엣지 브로커 → 스트림 적재 확장
 - [ ] **피처 중요도·혼동행렬 시각화** 이미지 README 첨부
 - [ ] **ONNX 변환** — 엣지/모바일/타 언어 추론 확장
 

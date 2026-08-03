@@ -11,7 +11,9 @@
 - FastAPI 추론 API
 - WebSocket 기반 실시간 관제 서버
 - Three.js 3D 디지털 트윈
+- MQTT-style edge telemetry topic/payload contract
 - 시계열 이벤트 저장/집계/CSV 반출
+- 예측정비 작업지시 API
 - MTBF/MTTR/Availability, Prometheus metrics
 - pytest contract tests, GitHub Actions CI, Docker smoke test
 
@@ -28,7 +30,7 @@
 | 5 | `realtime_server.py` endpoint 표 문서화 | API contract table |
 | 6 | Health Index 산식 설명 문서화 | PHM 관점 설명 보강 |
 | 7 | 센서 한계 분석 문서화 | 정상 노이즈와 희귀 고장 중첩 사례 정리 |
-| 8 | MQTT 확장 설계만 문서화 | 실제 구현 전 architecture note |
+| 8 | MQTT-style edge telemetry 계약 구현 | `/api/edge-contract`, `/api/edge-events` |
 | 9 | 외부 TSDB 확장 설계 | SQLite -> InfluxDB/TimescaleDB migration note |
 | 10 | 실제 추론 tick 전환 계획 | 사전계산 replay -> live booster call risk list |
 | 11 | Docker compose 추가 | `docker compose up` 한 줄 실행 |
@@ -58,4 +60,3 @@
 - 컨택 메일에 보낼 링크가 너무 많지 않은가?
 - 교수님이 2분 안에 "이 학생이 뭘 연구하고 싶은지" 이해할 수 있는가?
 - 대기업 면접관이 "현장 적용 가능성"을 볼 수 있는가?
-

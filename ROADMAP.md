@@ -44,7 +44,8 @@
 - [x] C5 모델 카드/모델 거버넌스 — artifact SHA256·피처 계약·성능·한계·재학습 트리거 문서/API화 ✅
 - [x] C6 포트폴리오 리뷰어 가이드 — 3분 시연 순서·직무 키워드 매핑·면접 포인트 문서/API화 ✅
 - [x] C7 예측정비 작업지시 — AI 경고·저건전도 설비를 P1/P2/P3 작업지시로 자동 생성하고 상태 추적(`/api/work-orders`) ✅
-- [ ] C8 (스트레치) MQTT 수집-추론 분리 / 외부 시계열DB 이력
+- [x] C8 MQTT-style 엣지 수집 계약 — AGV별 topic/payload schema와 최근 edge message buffer(`/api/edge-contract`, `/api/edge-events`) ✅
+- [ ] C9 (스트레치) 실제 MQTT 브로커 수집 / 외부 시계열DB 이력
 
 ---
 

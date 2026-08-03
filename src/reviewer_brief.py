@@ -31,8 +31,8 @@ def build_reviewer_brief() -> dict:
             {
                 "step": 3,
                 "title": "Inspect data/AI operations endpoints",
-                "path": "/api/work-orders, /api/reliability, /api/drift, /api/data-quality, /api/model-card",
-                "look_for": "Maintenance work orders, MTBF/MTTR, data drift, QA metrics, model artifact lineage and feature contract.",
+                "path": "/api/edge-events, /api/work-orders, /api/reliability, /api/drift, /api/data-quality, /api/model-card",
+                "look_for": "Edge telemetry topics, maintenance work orders, MTBF/MTTR, data drift, QA metrics, model artifact lineage and feature contract.",
             },
             {
                 "step": 4,
@@ -60,7 +60,7 @@ def build_reviewer_brief() -> dict:
             },
             {
                 "claim": "Data engineering is represented",
-                "evidence": "SQLite event store, rollups, history query, CSV export, retention policy.",
+                "evidence": "MQTT-style edge messages, SQLite event store, rollups, history query, CSV export, retention policy.",
             },
             {
                 "claim": "MLOps and governance are represented",
@@ -74,13 +74,13 @@ def build_reviewer_brief() -> dict:
         "role_mapping": [
             {
                 "role": "Data / AI Engineer",
-                "keywords": ["ETL", "feature engineering", "model serving", "MLOps", "data quality"],
-                "evidence": ["/predict", "/api/data-quality", "/api/drift", "/api/model-card"],
+                "keywords": ["ETL", "feature engineering", "model serving", "MLOps", "data quality", "edge telemetry"],
+                "evidence": ["/predict", "/api/edge-contract", "/api/edge-events", "/api/data-quality", "/api/drift", "/api/model-card"],
             },
             {
                 "role": "Robotics / Smart Factory Engineer",
-                "keywords": ["AGV", "AMHS", "digital twin", "predictive maintenance", "fleet monitoring"],
-                "evidence": ["/twin", "/ws", "/api/snapshot", "/api/work-orders", "fab_layout.py"],
+                "keywords": ["AGV", "AMHS", "digital twin", "predictive maintenance", "fleet monitoring", "MQTT"],
+                "evidence": ["/twin", "/ws", "/api/snapshot", "/api/edge-events", "/api/work-orders", "fab_layout.py"],
             },
             {
                 "role": "Backend / Platform Engineer",
@@ -97,13 +97,13 @@ def build_reviewer_brief() -> dict:
             "0:00-0:20 Run docker compose or uvicorn and open /twin.",
             "0:20-0:55 Show moving AGVs, floors, OHT rails, lift, and severity colors.",
             "0:55-1:30 Click a warning AGV and explain health index, sensors, cause, and event history.",
-            "1:30-2:05 Open /api/work-orders, /api/reliability, and /api/trend to show operational analytics.",
+            "1:30-2:05 Open /api/edge-events, /api/work-orders, /api/reliability, and /api/trend to show operational analytics.",
             "2:05-2:35 Open /api/drift and /api/data-quality to show AI/data monitoring.",
-            "2:35-3:00 Open /api/model-card and close with artifact lineage and remaining MQTT/TSDB path.",
+            "2:35-3:00 Open /api/model-card and close with artifact lineage and real broker/TSDB scale-up path.",
         ],
         "current_status": {
-            "portfolio_demo": "91%",
-            "production_like_robotics_data_platform": "78%",
-            "next_best_work": "Record a 2-3 minute demo video and add an MQTT-style edge ingestion path.",
+            "portfolio_demo": "92%",
+            "production_like_robotics_data_platform": "82%",
+            "next_best_work": "Record a 2-3 minute demo video and replace the in-process edge buffer with a real MQTT broker bridge.",
         },
     }
