@@ -29,6 +29,7 @@ _DDL = """CREATE TABLE IF NOT EXISTS work_orders(
 
 
 OPEN_STATUSES = {"open", "acknowledged", "in_progress"}
+SLA_SECONDS = {"P1": 30 * 60, "P2": 2 * 60 * 60, "P3": 24 * 60 * 60}
 
 
 def priority_for(level: str | None, health: int) -> str:
@@ -55,6 +56,29 @@ def recommendation_for(fault: str, level: str | None, health: int) -> str:
     if health < 55:
         return "Preventive inspection: low health index despite normal instantaneous classification."
     return "Monitor next windows and keep the order open until health stabilizes."
+
+
+def sla_seconds_for(priority: str) -> int:
+    return SLA_SECONDS.get(priority, SLA_SECONDS["P3"])
+
+
+def enrich_order(row: dict, now: float | None = None) -> dict:
+    out = dict(row)
+    sla = sla_seconds_for(out.get("priority", "P3"))
+    due_ts = float(out["created_ts"]) + sla
+    out["sla_seconds"] = sla
+    out["due_ts"] = due_ts
+    if now is None:
+        out["age_sec"] = None
+        out["time_to_due_sec"] = None
+        out["overdue"] = False
+        return out
+    age = max(0.0, float(now) - float(out["created_ts"]))
+    time_to_due = due_ts - float(now)
+    out["age_sec"] = round(age, 1)
+    out["time_to_due_sec"] = round(time_to_due, 1)
+    out["overdue"] = out.get("status") in OPEN_STATUSES and time_to_due < 0
+    return out
 
 
 class WorkOrderStore:
@@ -110,7 +134,7 @@ class WorkOrderStore:
             changed += 1
         return changed
 
-    def list(self, status: str | None = None, limit: int = 50) -> list[dict]:
+    def list(self, status: str | None = None, limit: int = 50, now: float | None = None) -> list[dict]:
         q = "SELECT * FROM work_orders"
         args: tuple = ()
         if status:
@@ -121,7 +145,7 @@ class WorkOrderStore:
         with self.lock:
             cur = self.cx.execute(q, args)
             cols = [c[0] for c in cur.description]
-            return [dict(zip(cols, r)) for r in cur.fetchall()]
+            return [enrich_order(dict(zip(cols, r)), now=now) for r in cur.fetchall()]
 
     def set_status(self, order_id: str, status: str, ts: float) -> dict | None:
         if status not in {"open", "acknowledged", "in_progress", "resolved", "closed"}:
@@ -135,18 +159,18 @@ class WorkOrderStore:
                 (status, ts, order_id),
             )
             self.cx.commit()
-        return self.get(order_id)
+        return self.get(order_id, now=ts)
 
-    def get(self, order_id: str) -> dict | None:
+    def get(self, order_id: str, now: float | None = None) -> dict | None:
         with self.lock:
             cur = self.cx.execute("SELECT * FROM work_orders WHERE id=?", (order_id,))
             row = cur.fetchone()
             if not row:
                 return None
             cols = [c[0] for c in cur.description]
-            return dict(zip(cols, row))
+            return enrich_order(dict(zip(cols, row)), now=now)
 
-    def summary(self) -> dict:
+    def summary(self, now: float | None = None) -> dict:
         with self.lock:
             total = self.cx.execute("SELECT COUNT(*) FROM work_orders").fetchone()[0]
             by_status = dict(self.cx.execute(
@@ -159,4 +183,20 @@ class WorkOrderStore:
                 "SELECT COUNT(*) FROM work_orders WHERE status IN ('open','acknowledged','in_progress') "
                 "AND priority='P1'"
             ).fetchone()[0]
-        return {"total": total, "by_status": by_status, "by_priority": by_priority, "open_p1": open_p1}
+            cur = self.cx.execute("SELECT * FROM work_orders")
+            cols = [c[0] for c in cur.description]
+            rows = cur.fetchall()
+        enriched = [enrich_order(dict(zip(cols, r)), now=now) for r in rows]
+        overdue_open = sum(1 for r in enriched if r["overdue"])
+        open_by_priority = {
+            p: sum(1 for r in enriched if r["status"] in OPEN_STATUSES and r["priority"] == p)
+            for p in ("P1", "P2", "P3")
+        }
+        return {
+            "total": total,
+            "by_status": by_status,
+            "by_priority": by_priority,
+            "open_by_priority": open_by_priority,
+            "open_p1": open_p1,
+            "overdue_open": overdue_open,
+        }

@@ -270,15 +270,18 @@ def test_work_order_endpoint_contract(client):
     assert r.status_code == 200
     body = r.json()
     assert {"summary", "orders"} <= body.keys()
-    assert {"total", "by_status", "by_priority", "open_p1"} <= body["summary"].keys()
+    assert {"total", "by_status", "by_priority", "open_by_priority",
+            "open_p1", "overdue_open"} <= body["summary"].keys()
     assert isinstance(body["orders"], list)
+    if body["orders"]:
+        assert {"sla_seconds", "due_ts", "age_sec", "time_to_due_sec", "overdue"} <= body["orders"][0].keys()
 
     filtered = client.get("/api/work-orders", params={"status": "open", "limit": 5})
     assert filtered.status_code == 200
     assert len(filtered.json()["orders"]) <= 5
 
     m = client.get("/metrics").text
-    for name in ("fab_work_orders_total", "fab_work_orders_open_p1"):
+    for name in ("fab_work_orders_total", "fab_work_orders_open_p1", "fab_work_orders_overdue_open"):
         assert f"# TYPE {name} gauge" in m and f"\n{name} " in m, f"{name} 메트릭 누락"
 
 

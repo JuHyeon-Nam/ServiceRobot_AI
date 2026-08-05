@@ -334,11 +334,12 @@ def api_edge_events(limit: int = 50, topic_prefix: str = None):
 @app.get("/api/work-orders")
 def api_work_orders(status: str = None, limit: int = 50):
     """AI 진단에서 자동 생성된 정비 작업지시 목록(CMMS-style queue)."""
+    now = time.time()
     snap = snapshot()
-    WORK_ORDERS.sync_from_snapshot(time.time(), snap["agvs"])
+    WORK_ORDERS.sync_from_snapshot(now, snap["agvs"])
     return JSONResponse({
-        "summary": WORK_ORDERS.summary(),
-        "orders": WORK_ORDERS.list(status=status, limit=min(max(limit, 1), 200)),
+        "summary": WORK_ORDERS.summary(now=now),
+        "orders": WORK_ORDERS.list(status=status, limit=min(max(limit, 1), 200), now=now),
     })
 
 
@@ -399,7 +400,7 @@ def metrics():
     st = STORE.stats()
     rel = STORE.reliability(n_total=len(PLAN))
     drift = DRIFT.evaluate(snap["agvs"])
-    wo = WORK_ORDERS.summary()
+    wo = WORK_ORDERS.summary(now=time.time())
     edge = EDGE.summary()
     g = lambda name, help_, val: (f"# HELP {name} {help_}\n# TYPE {name} gauge\n{name} {val}")
     lines = [
@@ -423,6 +424,7 @@ def metrics():
         g("fab_edge_invalid_messages", "스키마 검증 실패 edge telemetry 메시지 수", edge["invalid_messages"]),
         g("fab_work_orders_total", "누적 정비 작업지시 수", wo["total"]),
         g("fab_work_orders_open_p1", "미해결 P1 긴급 작업지시 수", wo["open_p1"]),
+        g("fab_work_orders_overdue_open", "SLA 초과 미해결 작업지시 수", wo["overdue_open"]),
         g("fab_fleet_availability", "플릿 가용도(0~1)", rel["availability"]),
         g("fab_fleet_mttr_seconds", "평균 복구 시간(초)", rel["mttr"]),
         g("fab_fleet_mtbf_seconds", "평균 고장 간격(초)", rel["mtbf"] if rel["mtbf"] is not None else 0),
