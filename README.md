@@ -1,32 +1,66 @@
 # ServiceRobot_AI
 
-Real-time predictive maintenance system for service robots and FAB-style AGV
-fleets. The project combines a lightweight LightGBM fault-diagnosis model,
-FastAPI model serving, WebSocket streaming, a 3D digital twin, edge telemetry
-contracts, telemetry persistence, reliability metrics, drift monitoring, and
-maintenance work-order generation.
+서비스 로봇 및 FAB-style AGV 플릿을 대상으로 한 **실시간 예지보전(Predictive Maintenance) 시스템**입니다.
+LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간 스트리밍, Three.js 3D 디지털 트윈, MQTT-compatible 엣지 텔레메트리 계약, SQLite 시계열 저장소, 신뢰성 지표, 드리프트 모니터링, 정비 작업지시 큐를 하나의 실행 가능한 시스템으로 구성했습니다.
 
 [![CI](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml/badge.svg)](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml)
 
+## 기술 스택
+
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)
+![LightGBM](https://img.shields.io/badge/LightGBM-4.6-02569B?style=flat-square)
+![scikit-learn](https://img.shields.io/badge/scikit--learn-metrics-F7931E?style=flat-square&logo=scikitlearn&logoColor=white)
+![NumPy](https://img.shields.io/badge/NumPy-FFT%20%2F%20features-013243?style=flat-square&logo=numpy&logoColor=white)
+![Pandas](https://img.shields.io/badge/Pandas-ETL-150458?style=flat-square&logo=pandas&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-REST%20API-009688?style=flat-square&logo=fastapi&logoColor=white)
+![Uvicorn](https://img.shields.io/badge/Uvicorn-ASGI-499848?style=flat-square)
+![Pydantic](https://img.shields.io/badge/Pydantic-v2-E92063?style=flat-square&logo=pydantic&logoColor=white)
+![WebSocket](https://img.shields.io/badge/WebSocket-realtime-010101?style=flat-square)
+![Three.js](https://img.shields.io/badge/Three.js-3D%20Twin-000000?style=flat-square&logo=threedotjs&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-telemetry-003B57?style=flat-square&logo=sqlite&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-compose-2496ED?style=flat-square&logo=docker&logoColor=white)
+![Prometheus](https://img.shields.io/badge/Prometheus-metrics-E6522C?style=flat-square&logo=prometheus&logoColor=white)
+![Pytest](https://img.shields.io/badge/Pytest-contract%20tests-0A9EDC?style=flat-square&logo=pytest&logoColor=white)
+
+## 구현 화면
+
+### 3D 디지털 트윈
+
+`/twin`은 3개 층 FAB 구조, AGV 이동, 경고 하이라이트, 설비 선택 패널, 실시간 센서/AI 진단 정보를 Three.js로 시각화합니다.
+
 ![3D digital twin](assets/twin_3d.gif)
 
-## Summary
+### 2D 관제 화면
 
-| Area | Implementation |
+실시간 AGV 상태, 경고 피드, KPI, 플릿 현황을 빠르게 확인하기 위한 2D 관제 화면입니다.
+
+![Realtime control center](assets/control_center.png)
+
+### 모델 해석 및 성능 산출물
+
+학습된 LightGBM 모델의 주요 피처와 클래스별 성능을 별도 artifact로 생성합니다.
+
+| Feature importance | Per-class F1 | Confusion matrix |
+|---|---|---|
+| ![Feature importance](assets/feature_importance.png) | ![Per-class F1](assets/per_class_f1.png) | ![Confusion matrix](assets/confusion_matrix.png) |
+
+## 핵심 기능
+
+| 영역 | 구현 내용 |
 |---|---|
-| Fault diagnosis | 9-class robot state classification: normal + 8 fault codes |
-| Model | LightGBM native model, 249 engineered features, CPU inference |
-| Validation | Official validation split accuracy `0.9329`; macro-F1 `0.5838` |
-| Serving | FastAPI `/predict`, `/health`, `/model-card` |
-| Digital twin | FastAPI + WebSocket state stream + Three.js 3D FAB/AGV view at `/twin` |
-| Edge telemetry | MQTT-compatible topic/payload contract at `/api/edge-contract`, recent messages at `/api/edge-events` |
-| Telemetry store | SQLite event store with history, rollups, CSV export, retention |
-| Reliability | MTBF, MTTR, availability, worst assets via `/api/reliability` |
-| AI operations | Data quality metrics, drift monitoring, model card, Prometheus metrics |
-| Maintenance operations | P1/P2/P3 predictive maintenance work orders via `/api/work-orders` |
-| Deployment | Dockerfile and `docker compose up --build` with durable telemetry volume |
+| 고장 진단 | 정상 + 8개 고장 코드, 총 9-class 상태 분류 |
+| 모델 | LightGBM native model, 249개 engineered feature, CPU 추론 |
+| 검증 | Official validation split accuracy `0.9329`, macro-F1 `0.5838` |
+| 추론 API | FastAPI `/predict`, `/health`, `/model-card` |
+| 실시간 관제 | FastAPI + WebSocket + Three.js 3D twin (`/twin`) |
+| 엣지 텔레메트리 | MQTT-compatible topic/payload contract (`/api/edge-contract`, `/api/edge-events`) |
+| 시계열 저장 | SQLite 이벤트 저장, 이력 조회, rollup, CSV export, retention |
+| 신뢰성 지표 | MTBF, MTTR, availability, worst asset 분석 (`/api/reliability`) |
+| AI 운영 | 데이터 QA, 드리프트 감지, 모델 카드, Prometheus metrics |
+| 정비 운영 | P1/P2/P3 작업지시, SLA, overdue 지표 (`/api/work-orders`) |
+| 배포 | Dockerfile, `docker compose up --build`, durable telemetry volume |
 
-## System Architecture
+## 시스템 아키텍처
 
 ```mermaid
 flowchart LR
@@ -46,22 +80,21 @@ flowchart LR
     twin --> metrics["Prometheus /metrics"]
 ```
 
-## Model
+## 모델
 
-The model diagnoses one normal class and eight robot fault classes from a
-30-step sensor window plus static/context features.
+30-step 센서 window와 정적/context feature를 사용해 서비스 로봇의 현재 상태를 진단합니다.
 
-| Item | Value |
+| 항목 | 값 |
 |---|---|
-| Model artifact | `data/processed/robot_pdm_enhanced.txt` |
-| Format | LightGBM native text model |
-| Size | 4.30 MiB |
-| Feature count | 249 |
+| 모델 artifact | `data/processed/robot_pdm_enhanced.txt` |
+| 형식 | LightGBM native text model |
+| 크기 | 4.30 MiB |
+| Feature 수 | 249 |
 | Official validation accuracy | 0.9329 |
 | Official validation macro-F1 | 0.5838 |
 | Best iteration | 73 |
 
-Fault classes:
+### 진단 클래스
 
 - `정상`
 - `E-ENV-C`: collision risk
@@ -75,39 +108,41 @@ Fault classes:
 
 ### Feature Contract
 
-Input window:
+입력 window:
 
 - 30 timesteps.
 - Raw dynamic sensors: `batteryLevel`, `speed`, `x`, `y`, `degree`, `collision`, `obstacle`.
 - Model dynamic sensors: `batteryLevel`, `speed`, `degree`, `collision`, `obstacle`.
-- Excluded dynamic sensors: `x`, `y`, removed to reduce site-coordinate memorization.
+- Excluded dynamic sensors: `x`, `y`.
 - Static/context features: `isOffline`, `nowCharging`, `emergencyStop`, `batteryUse`,
   `batteryCycleCount`, `distance`, `crowd`, `deviceType`, `mainState`.
 
 Feature engineering:
 
-- Flattened retained time-series values.
-- Mean, standard deviation, and drift features per retained dynamic sensor.
-- First 15 rFFT magnitudes per retained dynamic sensor.
-- Encoded static/context features.
+- retained time-series flatten.
+- sensor별 mean, standard deviation, drift feature.
+- retained dynamic sensor별 rFFT magnitude 15개.
+- static/context feature encoding.
+
+좌표 `x`, `y`는 사이트 좌표계 암기를 줄이기 위해 모델 입력에서 제외하고, 관제/디지털 트윈 시각화 좌표로만 사용합니다.
 
 ## Runtime Components
 
 | Component | File | Responsibility |
 |---|---|---|
-| Dataset builder | `src/build_enhanced_dataset.py` | Convert original JSON data into train/validation arrays and replay metadata |
-| Trainer | `src/train_enhanced.py` | Train the LightGBM model with the production feature contract |
-| Evaluator | `src/evaluate_enhanced.py` | Re-measure saved model performance and generate evaluation artifacts |
-| Inference API | `src/app.py` | Serve `/predict`, `/health`, `/model-card` |
-| Runtime feature builder | `src/pdm_runtime.py` | Load model artifacts and run live feature generation/inference |
-| Realtime server | `src/realtime_server.py` | Stream AGV state, serve `/twin`, expose operational APIs |
-| FAB layout | `src/fab_layout.py` | Shared floor, equipment, track, and AGV path definitions |
-| Edge gateway | `src/edge_gateway.py` | Convert live AGV state into MQTT-compatible telemetry envelopes |
-| Telemetry store | `src/telemetry_store.py` | Persist and aggregate selected warning/low-health events |
-| Work-order store | `src/work_order_store.py` | Create and update predictive maintenance work orders |
-| Data quality monitor | `src/dataset_quality.py` | Evaluate schema, annotation, QA, and ingest metrics |
-| Drift monitor | `src/drift_monitor.py` | Compare live telemetry against the reference operating profile |
-| Model card builder | `src/model_card.py` | Publish artifact hash, feature contract, metrics, limitations |
+| Dataset builder | `src/build_enhanced_dataset.py` | 원본 JSON을 train/validation array와 replay metadata로 변환 |
+| Trainer | `src/train_enhanced.py` | LightGBM 모델 학습 |
+| Evaluator | `src/evaluate_enhanced.py` | 저장 모델 성능 재측정 및 평가 artifact 생성 |
+| Inference API | `src/app.py` | `/predict`, `/health`, `/model-card` 제공 |
+| Runtime feature builder | `src/pdm_runtime.py` | 모델 로드, live feature 생성, 추론 실행 |
+| Realtime server | `src/realtime_server.py` | `/twin`, `/ws`, operational API 제공 |
+| FAB layout | `src/fab_layout.py` | 층, 장비, 트랙, AGV 경로 정의 |
+| Edge gateway | `src/edge_gateway.py` | AGV 상태를 MQTT-compatible telemetry envelope로 변환 |
+| Telemetry store | `src/telemetry_store.py` | warning/low-health 이벤트 저장 및 집계 |
+| Work-order store | `src/work_order_store.py` | 예측정비 작업지시 생성, 상태, SLA 관리 |
+| Data quality monitor | `src/dataset_quality.py` | schema, annotation, QA, ingest metric 계산 |
+| Drift monitor | `src/drift_monitor.py` | live telemetry와 기준 운전 profile 비교 |
+| Model card builder | `src/model_card.py` | artifact hash, feature contract, metric, limitation 공개 |
 
 ## Quick Start
 
@@ -117,13 +152,13 @@ Feature engineering:
 docker compose up --build
 ```
 
-Open:
+접속:
 
 - `http://127.0.0.1:8000/twin`
 - `http://127.0.0.1:8000/api/snapshot`
 - `http://127.0.0.1:8000/metrics`
 
-Docker Compose persists runtime telemetry in the `telemetry-data` volume:
+Docker Compose는 runtime telemetry를 `telemetry-data` volume에 저장합니다.
 
 ```yaml
 TELEMETRY_DB: /app/data/runtime/telemetry.db
@@ -140,18 +175,16 @@ cd src
 uvicorn realtime_server:app --reload
 ```
 
-Open `http://127.0.0.1:8000/twin`.
+접속: `http://127.0.0.1:8000/twin`
 
 ### Inference API
-
-Run the standalone prediction server:
 
 ```bash
 cd src
 uvicorn app:app --reload
 ```
 
-Example request:
+예시:
 
 ```json
 POST /predict
@@ -168,10 +201,9 @@ POST /predict
 }
 ```
 
-The `window` must contain 30 timesteps in normal use. The shortened example
-above only illustrates field order.
+실제 요청에서는 `window`가 30 timesteps를 포함해야 합니다. 위 예시는 field order를 보여주기 위한 축약 예시입니다.
 
-## Operational APIs
+## API
 
 ### Realtime State
 
@@ -187,12 +219,12 @@ above only illustrates field order.
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/history?agv=AGV-03&limit=200` | Recent events for one AGV |
-| `GET /api/history?agv=AGV-03&fmt=csv` | CSV export for one AGV |
-| `GET /api/stats` | Session aggregate by level, floor, asset, health |
-| `GET /api/trend?bucket=60&n=15` | Time-bucket rollup for trend charts |
+| `GET /api/history?agv=AGV-03&limit=200` | AGV별 최근 이벤트 |
+| `GET /api/history?agv=AGV-03&fmt=csv` | AGV별 이벤트 CSV export |
+| `GET /api/stats` | level, floor, asset, health 기준 session aggregate |
+| `GET /api/trend?bucket=60&n=15` | 시간 bucket rollup |
 | `GET /api/reliability` | Fleet MTBF, MTTR, availability, worst assets |
-| `GET /api/reliability?agv=AGV-03` | Reliability metrics for one AGV |
+| `GET /api/reliability?agv=AGV-03` | AGV 단위 reliability metrics |
 
 ### Edge Telemetry
 
@@ -221,19 +253,19 @@ Payload groups:
 |---|---|
 | `GET /api/data-quality` | Schema, annotation, QA, ingest, rework metrics |
 | `GET /api/drift` | Live feature drift status and recommendation |
-| `GET /api/model-card` | Model metadata from the realtime server |
-| `GET /model-card` | Model metadata from the inference server |
+| `GET /api/model-card` | Model metadata from realtime server |
+| `GET /model-card` | Model metadata from inference server |
 | `GET /metrics` | Prometheus text-format metrics |
 
 ### Maintenance Work Orders
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/work-orders` | Current predictive maintenance work-order queue |
+| `GET /api/work-orders` | Predictive maintenance work-order queue |
 | `GET /api/work-orders?status=open&limit=20` | Filtered work-order queue |
-| `POST /api/work-orders/{order_id}/status?status=in_progress` | Update work-order status |
+| `POST /api/work-orders/{order_id}/status?status=in_progress` | Work-order status update |
 
-Supported statuses:
+지원 상태:
 
 - `open`
 - `acknowledged`
@@ -241,17 +273,18 @@ Supported statuses:
 - `resolved`
 - `closed`
 
-Priority rules:
+SLA:
 
-- `P1`: danger-level diagnosis or health index below 30.
-- `P2`: warning-level diagnosis or health index below 55.
-- `P3`: lower-priority inspection.
+- `P1`: 30분.
+- `P2`: 2시간.
+- `P3`: 24시간.
+
+`/api/work-orders`는 `due_ts`, `age_sec`, `time_to_due_sec`, `overdue`를 함께 반환합니다.
 
 ## Training and Evaluation
 
-The committed model and replay data are sufficient for inference and the
-realtime demo. Rebuilding the dataset requires the original AI-Hub dataset,
-which is not stored in this repository.
+저장된 모델과 replay data만으로 추론 및 realtime demo를 실행할 수 있습니다.
+원본 AI-Hub dataset은 repository에 포함하지 않으며, dataset 재생성과 재학습 시 별도로 필요합니다.
 
 ```bash
 cd src
@@ -261,26 +294,22 @@ python evaluate_enhanced.py
 python build_replay.py
 ```
 
-The validation split is the primary metric because it evaluates robots not used
-during training. Random splitting can produce higher numbers but is less
-representative for deployment across unseen robot instances.
+Validation split은 학습에 사용하지 않은 robot instance를 기준으로 평가하기 때문에 주요 성능 기준으로 사용합니다.
 
 ## Testing
-
-Run the full test suite:
 
 ```bash
 .venv/bin/python -m pytest tests -q
 ```
 
-The tests cover:
+테스트 범위:
 
 - Prediction feature contract and inference API behavior.
 - Realtime twin API contracts.
 - Live Booster inference fields.
 - Telemetry storage, retention, history, rollups, reliability metrics.
 - Edge telemetry schema and API contract.
-- Work-order creation and status transitions.
+- Work-order creation, SLA, overdue, status transitions.
 - Data quality, drift monitoring, model card, documentation metadata, Docker contracts.
 
 ## Repository Layout
@@ -317,24 +346,16 @@ ServiceRobot_AI/
 
 ## Design Notes
 
-- The model artifact is stored as LightGBM native text, avoiding pickle-based
-  model loading and keeping CPU-only serving simple.
-- Absolute x/y coordinates are excluded from model features to reduce layout
-  memorization and improve transfer to different sites.
-- The realtime twin runs live LightGBM inference on synthesized 30-step windows;
-  replay labels remain as audit metadata.
-- SQLite is used for the built-in telemetry and work-order stores to keep the
-  runtime self-contained. The edge telemetry contract provides a clear path to
-  a real MQTT broker and external time-series database.
-- Prometheus metrics expose fleet status, inference latency, edge ingest counts,
-  drift status, reliability, telemetry volume, and work-order counts.
+- LightGBM native text model을 사용해 pickle 기반 model loading을 피하고 CPU-only serving을 단순화했습니다.
+- `x`, `y` 좌표는 모델 feature에서 제외하고 디지털 트윈 시각화에만 사용합니다.
+- Realtime twin은 합성된 30-step window를 live LightGBM inference 경로로 통과시킵니다.
+- SQLite는 local demo와 compact deployment를 위한 기본 저장소입니다.
+- MQTT-compatible edge telemetry contract는 실제 broker 및 외부 time-series DB로 확장하기 위한 경계입니다.
+- Prometheus metrics는 fleet 상태, inference latency, edge ingest, drift, reliability, telemetry volume, work-order SLA를 노출합니다.
 
 ## Limitations
 
-- The live digital twin uses replay trajectories and deterministic sensor-window
-  synthesis. A physical robot feed should be validated separately.
-- Rare fault classes have low validation support, so per-class reliability is
-  weaker than aggregate accuracy.
-- SQLite is appropriate for a local demo and compact deployment. High-volume
-  production telemetry should use a broker plus a time-series database.
-- The 3D twin is an operational simulation, not a plant-calibrated layout.
+- Live digital twin은 replay trajectory와 deterministic sensor-window synthesis를 사용합니다.
+- Rare fault class는 validation support가 낮아 aggregate accuracy보다 per-class reliability가 약합니다.
+- SQLite는 compact runtime에는 적합하지만 고빈도 telemetry production workload에는 broker + time-series DB가 필요합니다.
+- 3D twin은 operational simulation이며 실제 공장 layout calibration을 거친 모델은 아닙니다.
