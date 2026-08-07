@@ -55,7 +55,7 @@ LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간
 | 실시간 관제 | FastAPI + WebSocket + Three.js 3D twin (`/twin`) |
 | 엣지 텔레메트리 | MQTT-compatible topic/payload contract (`/api/edge-contract`, `/api/edge-events`) |
 | 시계열 저장 | SQLite 이벤트 저장, 이력 조회, rollup, CSV export, retention |
-| 신뢰성 지표 | MTBF, MTTR, availability, worst asset 분석 (`/api/reliability`) |
+| 신뢰성/리스크 지표 | MTBF, MTTR, availability, floor별 운영 risk 분석 (`/api/reliability`, `/api/fleet-risk`) |
 | AI 운영 | 데이터 QA, 드리프트 감지, 모델 카드, Prometheus metrics |
 | 정비 운영 | P1/P2/P3 작업지시, SLA, overdue 지표 (`/api/work-orders`) |
 | 배포 | Dockerfile, `docker compose up --build`, durable telemetry volume |
@@ -75,7 +75,7 @@ flowchart LR
     twin --> ui["Three.js twin /twin"]
     twin --> edge["MQTT-style edge buffer<br/>/api/edge-events"]
     twin --> store["SQLite telemetry store"]
-    store --> ops["stats / history / trend / reliability"]
+    store --> ops["stats / history / trend / reliability / fleet risk"]
     twin --> work["work-order queue<br/>/api/work-orders"]
     twin --> metrics["Prometheus /metrics"]
 ```
@@ -225,6 +225,7 @@ POST /predict
 | `GET /api/trend?bucket=60&n=15` | 시간 bucket rollup |
 | `GET /api/reliability` | Fleet MTBF, MTTR, availability, worst assets |
 | `GET /api/reliability?agv=AGV-03` | AGV 단위 reliability metrics |
+| `GET /api/fleet-risk` | Floor별 운영 risk, bottleneck floor, 우선 대응 asset |
 
 ### Edge Telemetry
 
@@ -351,7 +352,7 @@ ServiceRobot_AI/
 - Realtime twin은 합성된 30-step window를 live LightGBM inference 경로로 통과시킵니다.
 - SQLite는 local demo와 compact deployment를 위한 기본 저장소입니다.
 - MQTT-compatible edge telemetry contract는 실제 broker 및 외부 time-series DB로 확장하기 위한 경계입니다.
-- Prometheus metrics는 fleet 상태, inference latency, edge ingest, drift, reliability, telemetry volume, work-order SLA를 노출합니다.
+- Prometheus metrics는 fleet 상태, 운영 risk score, inference latency, edge ingest, drift, reliability, telemetry volume, work-order SLA를 노출합니다.
 
 ## Limitations
 

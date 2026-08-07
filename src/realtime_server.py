@@ -23,6 +23,7 @@ from telemetry_store import TelemetryStore
 from dataset_quality import RoboticsDataQualityMonitor, records_from_agv_snapshot
 from drift_monitor import DataDriftMonitor
 from edge_gateway import EdgeGateway, edge_contract
+from fleet_risk import fleet_risk
 from model_card import build_model_card
 from pdm_runtime import load_runtime, predict_window, synthesize_live_window
 from reviewer_brief import build_reviewer_brief
@@ -355,6 +356,15 @@ def api_work_order_status(order_id: str, status: str):
     return JSONResponse(row)
 
 
+@app.get("/api/fleet-risk")
+def api_fleet_risk():
+    """운영 리스크 요약: floor별 위험도, 병목 floor, 우선 대응 asset."""
+    now = time.time()
+    snap = snapshot()
+    WORK_ORDERS.sync_from_snapshot(now, snap["agvs"])
+    return JSONResponse(fleet_risk(snap["agvs"], WORK_ORDERS.summary(now=now)))
+
+
 @app.get("/api/data-quality")
 def api_data_quality():
     """로보틱스 학습 데이터 QA 지표.
@@ -402,6 +412,7 @@ def metrics():
     drift = DRIFT.evaluate(snap["agvs"])
     wo = WORK_ORDERS.summary(now=time.time())
     edge = EDGE.summary()
+    risk = fleet_risk(snap["agvs"], wo)
     g = lambda name, help_, val: (f"# HELP {name} {help_}\n# TYPE {name} gauge\n{name} {val}")
     lines = [
         g("fab_agv_total", "가동 AGV 수", s["total"]),
@@ -425,6 +436,8 @@ def metrics():
         g("fab_work_orders_total", "누적 정비 작업지시 수", wo["total"]),
         g("fab_work_orders_open_p1", "미해결 P1 긴급 작업지시 수", wo["open_p1"]),
         g("fab_work_orders_overdue_open", "SLA 초과 미해결 작업지시 수", wo["overdue_open"]),
+        g("fab_fleet_risk_score", "플릿 운영 리스크 점수(0~100)", risk["score"]),
+        g("fab_fleet_risk_action_required", "우선 대응 필요 asset 수", risk["action_required"]),
         g("fab_fleet_availability", "플릿 가용도(0~1)", rel["availability"]),
         g("fab_fleet_mttr_seconds", "평균 복구 시간(초)", rel["mttr"]),
         g("fab_fleet_mtbf_seconds", "평균 고장 간격(초)", rel["mtbf"] if rel["mtbf"] is not None else 0),

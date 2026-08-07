@@ -285,6 +285,24 @@ def test_work_order_endpoint_contract(client):
         assert f"# TYPE {name} gauge" in m and f"\n{name} " in m, f"{name} 메트릭 누락"
 
 
+def test_fleet_risk_endpoint_contract(client):
+    """운영 리스크 요약 API: floor별 위험도와 우선 대응 asset 계약."""
+    r = client.get("/api/fleet-risk")
+    assert r.status_code == 200
+    body = r.json()
+    assert {"status", "score", "bottleneck_floor", "floor_risk", "top_assets",
+            "action_required", "work_orders", "recommendation"} <= body.keys()
+    assert body["status"] in ("ok", "watch", "critical")
+    assert 0 <= body["score"] <= 100
+    assert isinstance(body["floor_risk"], list) and body["floor_risk"]
+    assert {"floor", "total", "warn", "avg_health", "score", "critical_assets"} <= body["floor_risk"][0].keys()
+    assert isinstance(body["top_assets"], list)
+
+    m = client.get("/metrics").text
+    for name in ("fab_fleet_risk_score", "fab_fleet_risk_action_required"):
+        assert f"# TYPE {name} gauge" in m and f"\n{name} " in m, f"{name} 메트릭 누락"
+
+
 def test_edge_gateway_endpoint_contract(client):
     """C8: MQTT-style edge telemetry 토픽/스키마/최근 메시지 API 계약."""
     contract = client.get("/api/edge-contract").json()
