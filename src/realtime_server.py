@@ -25,6 +25,7 @@ from drift_monitor import DataDriftMonitor
 from edge_gateway import EdgeGateway, edge_contract
 from fleet_risk import fleet_risk
 from model_card import build_model_card
+from ops_report import build_ops_report, report_to_markdown
 from pdm_runtime import load_runtime, predict_window, synthesize_live_window
 from reviewer_brief import build_reviewer_brief
 from work_order_store import WorkOrderStore
@@ -363,6 +364,22 @@ def api_fleet_risk():
     snap = snapshot()
     WORK_ORDERS.sync_from_snapshot(now, snap["agvs"])
     return JSONResponse(fleet_risk(snap["agvs"], WORK_ORDERS.summary(now=now)))
+
+
+@app.get("/api/ops-report")
+def api_ops_report(fmt: str = "json"):
+    """운영 리포트: fleet/risk/work-order/drift/reliability/model 정보를 한 번에 조회."""
+    now = time.time()
+    snap = snapshot()
+    WORK_ORDERS.sync_from_snapshot(now, snap["agvs"])
+    wo = WORK_ORDERS.summary(now=now)
+    risk = fleet_risk(snap["agvs"], wo)
+    drift = DRIFT.evaluate(snap["agvs"])
+    rel = STORE.reliability(n_total=len(PLAN))
+    report = build_ops_report(now, snap, risk, wo, drift, rel, MODEL_CARD)
+    if fmt == "md":
+        return PlainTextResponse(report_to_markdown(report), media_type="text/markdown; charset=utf-8")
+    return JSONResponse(report)
 
 
 @app.get("/api/data-quality")

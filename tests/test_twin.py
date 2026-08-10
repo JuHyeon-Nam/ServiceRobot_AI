@@ -303,6 +303,24 @@ def test_fleet_risk_endpoint_contract(client):
         assert f"# TYPE {name} gauge" in m and f"\n{name} " in m, f"{name} 메트릭 누락"
 
 
+def test_ops_report_endpoint_contract(client):
+    """운영 리포트 API: risk/work-order/drift/reliability/model 요약 계약."""
+    r = client.get("/api/ops-report")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["schema"] == "fab.ops.report.v1"
+    assert {"fleet", "risk", "floor_risk", "top_assets", "work_orders",
+            "ai_ops", "reliability"} <= body.keys()
+    assert body["ai_ops"]["model_id"] == "robot-pdm-lightgbm-enhanced"
+    assert body["risk"]["status"] in ("ok", "watch", "critical")
+
+    md = client.get("/api/ops-report", params={"fmt": "md"})
+    assert md.status_code == 200
+    assert "text/markdown" in md.headers["content-type"]
+    assert "# FAB AGV Operations Report" in md.text
+    assert "## Top Risk Assets" in md.text
+
+
 def test_edge_gateway_endpoint_contract(client):
     """C8: MQTT-style edge telemetry 토픽/스키마/최근 메시지 API 계약."""
     contract = client.get("/api/edge-contract").json()

@@ -57,6 +57,7 @@ LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간
 | 시계열 저장 | SQLite 이벤트 저장, 이력 조회, rollup, CSV export, retention |
 | 신뢰성/리스크 지표 | MTBF, MTTR, availability, floor별 운영 risk 분석 (`/api/reliability`, `/api/fleet-risk`) |
 | AI 운영 | 데이터 QA, 드리프트 감지, 모델 카드, Prometheus metrics |
+| 운영 리포트 | fleet/risk/work-order/drift/reliability/model 요약 JSON/Markdown export (`/api/ops-report`) |
 | 정비 운영 | P1/P2/P3 작업지시, SLA, overdue 지표 (`/api/work-orders`) |
 | 배포 | Dockerfile, `docker compose up --build`, durable telemetry volume |
 
@@ -226,6 +227,8 @@ POST /predict
 | `GET /api/reliability` | Fleet MTBF, MTTR, availability, worst assets |
 | `GET /api/reliability?agv=AGV-03` | AGV 단위 reliability metrics |
 | `GET /api/fleet-risk` | Floor별 운영 risk, bottleneck floor, 우선 대응 asset |
+| `GET /api/ops-report` | 운영 요약 report JSON |
+| `GET /api/ops-report?fmt=md` | 운영 요약 report Markdown export |
 
 ### Edge Telemetry
 
