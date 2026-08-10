@@ -321,6 +321,25 @@ def test_ops_report_endpoint_contract(client):
     assert "## Top Risk Assets" in md.text
 
 
+def test_shift_handover_endpoint_contract(client):
+    """교대 인수인계 API: checklist/watch asset Markdown export 계약."""
+    r = client.get("/api/shift-handover", params={"shift": "night"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["schema"] == "fab.shift.handover.v1"
+    assert body["shift"] == "night"
+    assert body["status"] in ("ok", "watch", "critical")
+    assert {"summary", "checklist", "watch_assets", "floor_focus", "model"} <= body.keys()
+    assert isinstance(body["checklist"], list) and body["checklist"]
+    assert {"priority", "category", "action"} <= body["checklist"][0].keys()
+
+    md = client.get("/api/shift-handover", params={"shift": "night", "fmt": "md"})
+    assert md.status_code == 200
+    assert "text/markdown" in md.headers["content-type"]
+    assert "# FAB AGV Shift Handover" in md.text
+    assert "## Checklist" in md.text
+
+
 def test_edge_gateway_endpoint_contract(client):
     """C8: MQTT-style edge telemetry 토픽/스키마/최근 메시지 API 계약."""
     contract = client.get("/api/edge-contract").json()

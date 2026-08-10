@@ -25,7 +25,7 @@ from drift_monitor import DataDriftMonitor
 from edge_gateway import EdgeGateway, edge_contract
 from fleet_risk import fleet_risk
 from model_card import build_model_card
-from ops_report import build_ops_report, report_to_markdown
+from ops_report import build_ops_report, build_shift_handover, handover_to_markdown, report_to_markdown
 from pdm_runtime import load_runtime, predict_window, synthesize_live_window
 from reviewer_brief import build_reviewer_brief
 from work_order_store import WorkOrderStore
@@ -380,6 +380,29 @@ def api_ops_report(fmt: str = "json"):
     if fmt == "md":
         return PlainTextResponse(report_to_markdown(report), media_type="text/markdown; charset=utf-8")
     return JSONResponse(report)
+
+
+@app.get("/api/shift-handover")
+def api_shift_handover(shift: str = "current", fmt: str = "json"):
+    """교대 인수인계 요약: 운영 상태, checklist, watch asset."""
+    now = time.time()
+    snap = snapshot()
+    WORK_ORDERS.sync_from_snapshot(now, snap["agvs"])
+    wo = WORK_ORDERS.summary(now=now)
+    risk = fleet_risk(snap["agvs"], wo)
+    report = build_ops_report(
+        now,
+        snap,
+        risk,
+        wo,
+        DRIFT.evaluate(snap["agvs"]),
+        STORE.reliability(n_total=len(PLAN)),
+        MODEL_CARD,
+    )
+    handover = build_shift_handover(report, shift=shift)
+    if fmt == "md":
+        return PlainTextResponse(handover_to_markdown(handover), media_type="text/markdown; charset=utf-8")
+    return JSONResponse(handover)
 
 
 @app.get("/api/data-quality")

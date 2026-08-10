@@ -115,3 +115,110 @@ def report_to_markdown(report: dict) -> str:
             f"{floor['avg_health']} | {floor['score']} | {floor['critical_assets']} |"
         )
     return "\n".join(lines) + "\n"
+
+
+def build_shift_handover(report: dict, shift: str = "current") -> dict:
+    fleet = report["fleet"]
+    risk = report["risk"]
+    wo = report["work_orders"]
+    ai = report["ai_ops"]
+    rel = report["reliability"]
+
+    checklist = []
+    if wo["overdue_open"] > 0:
+        checklist.append({
+            "priority": "P1",
+            "category": "maintenance",
+            "action": f"Escalate {wo['overdue_open']} overdue work orders.",
+        })
+    if wo["open_p1"] > 0:
+        checklist.append({
+            "priority": "P1",
+            "category": "maintenance",
+            "action": f"Acknowledge and dispatch {wo['open_p1']} open P1 work orders.",
+        })
+    if risk["action_required"] > 0:
+        checklist.append({
+            "priority": "P2",
+            "category": "fleet",
+            "action": f"Inspect top {min(risk['action_required'], 5)} risk assets before normal patrol.",
+        })
+    if ai["drift_status"] != "ok":
+        checklist.append({
+            "priority": "P2",
+            "category": "ai_ops",
+            "action": f"Review drift status `{ai['drift_status']}` and sample-label the current window.",
+        })
+    if not checklist:
+        checklist.append({
+            "priority": "P3",
+            "category": "routine",
+            "action": "Continue normal monitoring cadence.",
+        })
+
+    if risk["status"] == "critical" or wo["overdue_open"] > 0:
+        status = "critical"
+    elif risk["status"] == "watch" or wo["open_p1"] > 0 or fleet["warn"] > 0 or ai["drift_status"] != "ok":
+        status = "watch"
+    else:
+        status = "ok"
+
+    return {
+        "schema": "fab.shift.handover.v1",
+        "ts": report["ts"],
+        "shift": shift,
+        "status": status,
+        "summary": [
+            f"Fleet warn {fleet['warn']}/{fleet['total']}, avg health {fleet['avg_health']}.",
+            f"Risk {risk['status']} score {risk['score']}, bottleneck floor {risk['bottleneck_floor']}.",
+            f"Work orders total {wo['total']}, open P1 {wo['open_p1']}, overdue {wo['overdue_open']}.",
+            f"Drift {ai['drift_status']} score {ai['drift_score']}, availability {rel['availability']}.",
+        ],
+        "checklist": checklist,
+        "watch_assets": report["top_assets"][:3],
+        "floor_focus": {
+            "bottleneck_floor": risk["bottleneck_floor"],
+            "floor_risk": report["floor_risk"],
+        },
+        "model": {
+            "model_id": ai["model_id"],
+            "inference_mode": ai["inference_mode"],
+            "last_latency_ms": ai["last_latency_ms"],
+        },
+    }
+
+
+def handover_to_markdown(handover: dict) -> str:
+    lines = [
+        "# FAB AGV Shift Handover",
+        "",
+        f"- Shift: `{handover['shift']}`",
+        f"- Timestamp: `{handover['ts']}`",
+        f"- Status: `{handover['status']}`",
+        "",
+        "## Summary",
+        "",
+    ]
+    lines += [f"- {item}" for item in handover["summary"]]
+    lines += [
+        "",
+        "## Checklist",
+        "",
+        "| Priority | Category | Action |",
+        "|---|---|---|",
+    ]
+    for item in handover["checklist"]:
+        lines.append(f"| {item['priority']} | {item['category']} | {item['action']} |")
+    lines += [
+        "",
+        "## Watch Assets",
+        "",
+        "| Asset | Floor | Risk | Fault | Health |",
+        "|---|---:|---:|---|---:|",
+    ]
+    for asset in handover["watch_assets"]:
+        lines.append(
+            f"| {asset['id']} | {asset['floor']} | {asset['risk']} | "
+            f"{asset.get('label') or asset.get('pred')} | {asset['health']} |"
+        )
+    return "\n".join(lines) + "\n"

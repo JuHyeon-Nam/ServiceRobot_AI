@@ -6,7 +6,7 @@ sys.path.insert(0, SRC)
 
 
 def test_ops_report_json_and_markdown_contract():
-    from ops_report import build_ops_report, report_to_markdown
+    from ops_report import build_ops_report, build_shift_handover, handover_to_markdown, report_to_markdown
 
     snap = {
         "kpi": {"total": 2, "ok": 1, "warn": 1, "avg_health": 72, "maint_due": 1, "deteriorating": 1},
@@ -42,3 +42,14 @@ def test_ops_report_json_and_markdown_contract():
     assert "# FAB AGV Operations Report" in md
     assert "| AGV-01 | 0 | 42 | 배터리 저하 | 경고 | 50 | 악화 |" in md
     assert "Keep monitoring." in md
+
+    handover = build_shift_handover(report, shift="day")
+    assert handover["schema"] == "fab.shift.handover.v1"
+    assert handover["shift"] == "day"
+    assert handover["status"] == "watch"
+    assert handover["checklist"][0]["priority"] == "P1"
+    assert handover["watch_assets"][0]["id"] == "AGV-01"
+
+    handover_md = handover_to_markdown(handover)
+    assert "# FAB AGV Shift Handover" in handover_md
+    assert "| P1 | maintenance | Acknowledge and dispatch 1 open P1 work orders. |" in handover_md
