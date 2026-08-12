@@ -24,6 +24,10 @@ LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간
 
 ## 구현 화면
 
+### 시연 허브
+
+`/demo`는 3D 디지털 트윈, 2D 관제 화면, 운영 리포트, 모델 카드, 데이터/AI 운영 지표를 한 화면에서 연결하는 실행형 시연 진입점입니다.
+
 ### 3D 디지털 트윈
 
 `/twin`은 3개 층 FAB 구조, AGV 이동, 경고 하이라이트, 설비 선택 패널, 실시간 센서/AI 진단 정보를 Three.js로 시각화합니다.
@@ -53,6 +57,7 @@ LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간
 | 검증 | Official validation split accuracy `0.9329`, macro-F1 `0.5838` |
 | 추론 API | FastAPI `/predict`, `/health`, `/model-card` |
 | 실시간 관제 | FastAPI + WebSocket + Three.js 3D twin (`/twin`) |
+| 시연 허브 | 주요 화면·운영 API·모델 산출물을 연결하는 데모 진입점 (`/demo`) |
 | 엣지 텔레메트리 | MQTT-compatible topic/payload contract (`/api/edge-contract`, `/api/edge-events`) |
 | 시계열 저장 | SQLite 이벤트 저장, 이력 조회, rollup, CSV export, retention |
 | 신뢰성/리스크 지표 | MTBF, MTTR, availability, floor별 운영 risk 분석 (`/api/reliability`, `/api/fleet-risk`) |
@@ -155,6 +160,7 @@ docker compose up --build
 
 접속:
 
+- `http://127.0.0.1:8000/demo`
 - `http://127.0.0.1:8000/twin`
 - `http://127.0.0.1:8000/api/snapshot`
 - `http://127.0.0.1:8000/metrics`
@@ -176,7 +182,7 @@ cd src
 uvicorn realtime_server:app --reload
 ```
 
-접속: `http://127.0.0.1:8000/twin`
+접속: `http://127.0.0.1:8000/demo`
 
 ### Inference API
 

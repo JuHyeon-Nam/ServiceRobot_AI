@@ -31,14 +31,17 @@ It should show four capabilities in one coherent demo:
 | Reliability, metrics, drift, model card | Done | 100% |
 | Portable deployment | Docker + compose done; local Docker unavailable here for manual run | 85% |
 | Physical/edge realism | MQTT-style contract done; real broker / external TSDB pending | 60% |
-| Portfolio packaging | Reviewer walkthrough and role mapping done; demo video still pending | 90% |
+| Demo packaging | Visual demo hub and reviewer walkthrough done; demo video still pending | 94% |
 
-Overall: **about 92% complete as a portfolio demo**, and **about 82% complete as
+Overall: **about 94% complete as a reviewable demo**, and **about 85% complete as
 a production-like robotics data platform**.
 
 ## What Is Already Demo-Ready
 
+- `/demo`: visual demo hub that links the 3D twin, 2D control center, operations
+  report, shift handover, model card, and visible artifacts in one entry point.
 - `/twin`: 3D FAB/AGV digital twin with touch navigation and warning highlights.
+- `/`: 2D control center for KPI, alert feed, and fleet status scanning.
 - `/ws`: live fleet state stream.
 - `/api/snapshot`: current AGV state and KPI contract.
 - `/api/snapshot` inference block: live LightGBM Booster mode, feature count,
@@ -61,7 +64,7 @@ a production-like robotics data platform**.
 | Priority | Work | Why it matters |
 |---|---|---|
 | P1 | Demo video, 2-3 minutes | Makes the project instantly reviewable in portfolio/resume contexts. |
-| P1 | README job-keyword polish | Add final resume-style phrasing and badges after video capture. |
+| P1 | README demo-video link and capture checklist | Turns the repository front page into a one-click visual review path. |
 | P2 | Real MQTT broker bridge | Replaces the in-process edge buffer with a broker subscriber/publisher. |
 | P2 | External time-series DB design or optional profile | Shows scaling path beyond SQLite. |
 | P3 | Physical robot or MQTT-fed sensor windows | Replaces the deterministic simulator windows with a real edge source. |
@@ -70,4 +73,4 @@ a production-like robotics data platform**.
 
 1. `docs(demo): add video script and capture checklist`
 2. `feat(edge): add real MQTT broker bridge`
-3. `docs(portfolio): add resume-ready project bullets`
+3. `feat(data): add optional time-series db profile`

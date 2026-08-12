@@ -28,6 +28,20 @@ def test_twin_page_served(client):
     assert "디지털 트윈" in r.text and "three" in r.text.lower()
 
 
+def test_demo_hub_page_served(client):
+    r = client.get("/demo")
+    assert r.status_code == 200
+    assert "ServiceRobot_AI Demo Hub" in r.text
+    for expected in ("/twin", "/api/ops-report?fmt=md", "/api/model-card", "/assets/twin_3d.gif"):
+        assert expected in r.text
+
+
+def test_demo_assets_served(client):
+    r = client.get("/assets/twin_3d.gif")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/gif")
+
+
 def test_layout_contract(client):
     L = client.get("/api/layout").json()
     assert L["canvas"] == {"w": 300, "h": 196}

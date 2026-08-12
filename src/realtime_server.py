@@ -33,6 +33,7 @@ from work_order_store import WorkOrderStore
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(_HERE, "..", "data", "processed")
 STATIC = os.path.join(_HERE, "static")
+ASSETS = os.path.join(_HERE, "..", "assets")
 KOR = {"E-ENV-C": "교차로 충돌위험", "E-ENV-O": "경로 장애물", "E-INF-A": "도어 연동",
        "E-INF-E": "층간리프트 연동", "E-RBT-B": "배터리 저하", "E-RBT-E": "긴급정지",
        "E-RBT-N": "통신 끊김", "E-RBT-S": "센서 이상", "정상": "정상"}
@@ -505,6 +506,12 @@ def index():
     return FileResponse(os.path.join(STATIC, "index.html"))
 
 
+@app.get("/demo")
+def demo():
+    """시연 허브 — 3D 트윈, 2D 관제, 운영 리포트, AI 품질 산출물을 한 화면에 연결."""
+    return FileResponse(os.path.join(STATIC, "demo.html"))
+
+
 @app.get("/twin")
 def twin():
     """3D 디지털 트윈 관제(Three.js) — 태블릿 터치 조작 + 실시간 AI 진단."""
@@ -513,3 +520,6 @@ def twin():
 
 if os.path.isdir(STATIC):
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+if os.path.isdir(ASSETS):
+    app.mount("/assets", StaticFiles(directory=ASSETS), name="assets")
