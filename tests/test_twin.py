@@ -28,6 +28,15 @@ def test_twin_page_served(client):
     assert "디지털 트윈" in r.text and "three" in r.text.lower()
 
 
+def test_twin_phm_patrol_cues(client):
+    r = client.get("/twin")
+    assert r.status_code == 200
+    assert "순찰 모드" in r.text
+    assert "PHM 단계" in r.text
+    assert "phmStage" in r.text
+    assert "autoRotate" in r.text
+
+
 def test_demo_hub_page_served(client):
     r = client.get("/demo")
     assert r.status_code == 200
