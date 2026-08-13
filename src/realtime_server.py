@@ -118,6 +118,74 @@ def maint_advice(health: int, trend_dir: str) -> str:
     return "정비 필요 · 우선 대응"
 
 
+def phm_forecast(trend: list, trend_dir: str, health: int, conf: float, warn: bool, sensors: dict) -> dict:
+    """PHM 예측 요약.
+
+    현재 데모는 실제 현장 RUL 모델이 아니라 live 진단 추세, 건전도, 센서 임계 신호를 결합한
+    운영용 heuristic forecast다. API 계약을 먼저 고정해두면 추후 별도 RUL/Survival 모델로
+    내부 계산만 교체할 수 있다.
+    """
+    if not trend:
+        trend = [0]
+    front = trend[: max(1, len(trend) // 2)]
+    back = trend[max(0, len(trend) // 2):]
+    trend_slope = (sum(back) / len(back)) - (sum(front) / len(front))
+    sensor_hits = [
+        ("진동 상승", sensors.get("vib", 0) > 5.0),
+        ("배터리 저하", sensors.get("batt", 100) < 30.0),
+        ("온도 상승", sensors.get("temp", 0) > 58.0),
+    ]
+    sensor_reasons = [name for name, hit in sensor_hits if hit]
+    sensor_penalty = 8 * len(sensor_reasons)
+    risk = (100 - health) + max(0.0, trend_slope) * 16 + sensor_penalty
+    if trend_dir == "악화":
+        risk += 12
+    if warn:
+        risk += 24 + conf * 18
+    risk_score = int(max(0, min(100, round(risk))))
+
+    if warn:
+        stage = "current_fault"
+        severity = "위험" if conf >= 0.85 or health < 30 else "경고"
+        rul_min = 0
+        action = "즉시 원인 확인 및 작업지시 처리"
+    elif risk_score >= 55:
+        stage = "predicted_fault"
+        severity = "경고"
+        rul_min = 45
+        action = "다음 정지 가능 시간에 점검 예약"
+    elif risk_score >= 30:
+        stage = "watch"
+        severity = "주의"
+        rul_min = 120
+        action = "센서 추세 모니터링 및 조건부 점검"
+    else:
+        stage = "normal"
+        severity = "정상"
+        rul_min = None
+        action = "정상 운전"
+
+    reasons = []
+    if trend_dir == "악화":
+        reasons.append("진단 추세 악화")
+    if health < 80:
+        reasons.append(f"건전도 {health}/100")
+    reasons.extend(sensor_reasons)
+    if not reasons:
+        reasons.append("운전 신호 정상 범위")
+    return {
+        "stage": stage,
+        "severity": severity,
+        "risk_score": risk_score,
+        "rul_estimate_min": rul_min,
+        "trend_slope": round(trend_slope, 3),
+        "reasons": reasons[:4],
+        "action": action,
+        "method": "health_trend_sensor_heuristic_v1",
+        "limitation": "현장 고장 시간으로 보정된 RUL 모델이 아니라 데모용 PHM 위험도 추정",
+    }
+
+
 def agv_sensors(i: int, n: int, pred: str) -> dict:
     """AGV 실시간 텔레메트리(진동·배터리·온도)를 결정론적으로 산출.
     replay 인덱스(i)에 위상을 고정해 재현 가능하고, 진단(pred)에 물리적으로 커플링한다.
@@ -225,11 +293,14 @@ def snapshot():
         trend_dir = trend_direction(trend)      # B2: 악화/개선/안정 방향(드리프트 조기 감지)
         health = health_index(trend, conf, warn)         # B4: 자산 건전도 지표(추세 종합)
         advice = maint_advice(health, trend_dir)         # B4: 정비 트리아지 권고
+        sensors = agv_sensors(i, n, pred)
+        phm = phm_forecast(trend, trend_dir, health, conf, warn, sensors)
         item = {"id": a["id"], "x": round(x, 2), "y": round(y, 2), "ang": round(ang, 1),
                 "floor": a["floor"], "status": "warn" if warn else "ok",
                 "pred": pred, "label": KOR.get(pred, pred), "conf": conf, "level": level,
-                "sensors": agv_sensors(i, n, pred), "cause": CAUSE.get(pred, CAUSE["정상"]),
+                "sensors": sensors, "cause": CAUSE.get(pred, CAUSE["정상"]),
                 "trend": trend, "trend_dir": trend_dir, "health": health, "advice": advice,
+                "phm": phm,
                 "inference_mode": "live_booster", "model_latency_ms": diag["latency_ms"],
                 "replay_pred": diag["replay_pred"], "replay_conf": diag["replay_conf"]}
         agvs.append(item)
@@ -279,6 +350,29 @@ def api_layout():
 @app.get("/api/snapshot")
 def api_snapshot():
     return JSONResponse(snapshot())
+
+
+@app.get("/api/phm")
+def api_phm(agv: str = None):
+    """AGV별 PHM forecast 요약. 3D twin 클릭 패널과 외부 리포팅이 공유하는 계약."""
+    snap = snapshot()
+    rows = [
+        {"id": a["id"], "floor": a["floor"], "label": a["label"], "health": a["health"],
+         "trend_dir": a["trend_dir"], "phm": a["phm"]}
+        for a in snap["agvs"]
+        if agv is None or a["id"] == agv
+    ]
+    if agv is not None and not rows:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    summary = {
+        "total": len(rows),
+        "current_fault": sum(r["phm"]["stage"] == "current_fault" for r in rows),
+        "predicted_fault": sum(r["phm"]["stage"] == "predicted_fault" for r in rows),
+        "watch": sum(r["phm"]["stage"] == "watch" for r in rows),
+        "normal": sum(r["phm"]["stage"] == "normal" for r in rows),
+        "max_risk_score": max((r["phm"]["risk_score"] for r in rows), default=0),
+    }
+    return JSONResponse({"schema": "fab.phm.forecast.v1", "summary": summary, "assets": rows})
 
 
 _HIST_COLS = ["ts", "pred", "conf", "level", "health", "vib", "batt", "temp"]
@@ -454,6 +548,7 @@ def metrics():
     wo = WORK_ORDERS.summary(now=time.time())
     edge = EDGE.summary()
     risk = fleet_risk(snap["agvs"], wo)
+    phm_assets = [a["phm"] for a in snap["agvs"]]
     g = lambda name, help_, val: (f"# HELP {name} {help_}\n# TYPE {name} gauge\n{name} {val}")
     lines = [
         g("fab_agv_total", "가동 AGV 수", s["total"]),
@@ -479,6 +574,10 @@ def metrics():
         g("fab_work_orders_overdue_open", "SLA 초과 미해결 작업지시 수", wo["overdue_open"]),
         g("fab_fleet_risk_score", "플릿 운영 리스크 점수(0~100)", risk["score"]),
         g("fab_fleet_risk_action_required", "우선 대응 필요 asset 수", risk["action_required"]),
+        g("fab_phm_max_risk_score", "AGV PHM 최대 위험도 점수(0~100)",
+          max((p["risk_score"] for p in phm_assets), default=0)),
+        g("fab_phm_predicted_fault_assets", "현재 이상 전 PHM 예측 이상 asset 수",
+          sum(p["stage"] in ("predicted_fault", "watch") for p in phm_assets)),
         g("fab_fleet_availability", "플릿 가용도(0~1)", rel["availability"]),
         g("fab_fleet_mttr_seconds", "평균 복구 시간(초)", rel["mttr"]),
         g("fab_fleet_mtbf_seconds", "평균 고장 간격(초)", rel["mtbf"] if rel["mtbf"] is not None else 0),

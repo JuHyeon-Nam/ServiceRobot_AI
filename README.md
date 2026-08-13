@@ -59,6 +59,7 @@ LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간
 | 추론 API | FastAPI `/predict`, `/health`, `/model-card` |
 | 실시간 관제 | FastAPI + WebSocket + Three.js 3D twin (`/twin`) |
 | 시연 허브 | 주요 화면·운영 API·모델 산출물을 연결하는 데모 진입점 (`/demo`) |
+| PHM 예측 | 진단 추세, 건전도, 센서 임계 신호 기반 위험도/RUL 추정 (`/api/phm`) |
 | 엣지 텔레메트리 | MQTT-compatible topic/payload contract (`/api/edge-contract`, `/api/edge-events`) |
 | 시계열 저장 | SQLite 이벤트 저장, 이력 조회, rollup, CSV export, retention |
 | 신뢰성/리스크 지표 | MTBF, MTTR, availability, floor별 운영 risk 분석 (`/api/reliability`, `/api/fleet-risk`) |
@@ -83,6 +84,7 @@ flowchart LR
     twin --> edge["MQTT-style edge buffer<br/>/api/edge-events"]
     twin --> store["SQLite telemetry store"]
     store --> ops["stats / history / trend / reliability / fleet risk"]
+    twin --> phm["PHM forecast<br/>/api/phm"]
     twin --> work["work-order queue<br/>/api/work-orders"]
     twin --> metrics["Prometheus /metrics"]
 ```
@@ -222,6 +224,8 @@ POST /predict
 | `WS /ws` | Live fleet state stream |
 | `GET /api/layout` | FAB floor/equipment/track layout |
 | `GET /api/snapshot` | Current AGV state, KPIs, inference metadata, alerts |
+| `GET /api/phm` | AGV별 PHM forecast, risk score, RUL estimate, action |
+| `GET /api/phm?agv=AGV-03` | Single AGV PHM forecast |
 
 ### Telemetry and Reliability
 
@@ -257,7 +261,7 @@ Payload groups:
 - `position`: x/y coordinate and heading.
 - `sensors`: vibration, battery, temperature.
 - `diagnosis`: status, fault code, label, confidence, severity level, trend.
-- `health`: health index and maintenance advice.
+- `health`: health index, PHM forecast, and maintenance advice.
 - `source`: inference mode, latency, replay audit field.
 
 ### AI Operations

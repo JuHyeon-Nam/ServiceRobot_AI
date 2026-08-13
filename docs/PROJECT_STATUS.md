@@ -28,12 +28,13 @@ It should show four capabilities in one coherent demo:
 | MQTT-style edge telemetry contract | Done; real broker still optional | 70% |
 | Telemetry storage / history / rollup | Done | 100% |
 | Predictive maintenance work orders | Done | 100% |
+| PHM forecast contract | Done; heuristic RUL can be replaced by calibrated model | 85% |
 | Reliability, metrics, drift, model card | Done | 100% |
 | Portable deployment | Docker + compose done; local Docker unavailable here for manual run | 85% |
 | Physical/edge realism | MQTT-style contract done; real broker / external TSDB pending | 60% |
 | Demo packaging | Visual demo hub and reviewer walkthrough done; demo video still pending | 94% |
 
-Overall: **about 94% complete as a reviewable demo**, and **about 85% complete as
+Overall: **about 95% complete as a reviewable demo**, and **about 86% complete as
 a production-like robotics data platform**.
 
 ## What Is Already Demo-Ready
@@ -43,7 +44,9 @@ a production-like robotics data platform**.
 - `/twin`: 3D FAB/AGV digital twin with touch navigation and warning highlights.
 - `/`: 2D control center for KPI, alert feed, and fleet status scanning.
 - `/ws`: live fleet state stream.
-- `/api/snapshot`: current AGV state and KPI contract.
+- `/api/snapshot`: current AGV state, KPI, and per-asset PHM forecast contract.
+- `/api/phm`: PHM forecast summary with stage, severity, risk score, RUL estimate,
+  reasons, and recommended action.
 - `/api/snapshot` inference block: live LightGBM Booster mode, feature count,
   latency, call count, and replay audit fields.
 - `/api/edge-contract`, `/api/edge-events`: MQTT-compatible topic/payload

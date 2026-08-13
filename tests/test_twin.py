@@ -33,6 +33,8 @@ def test_twin_phm_patrol_cues(client):
     assert r.status_code == 200
     assert "순찰 모드" in r.text
     assert "PHM 단계" in r.text
+    assert "PHM 위험도" in r.text
+    assert "예상 대응시점" in r.text
     assert "phmStage" in r.text
     assert "autoRotate" in r.text
 
@@ -41,7 +43,7 @@ def test_demo_hub_page_served(client):
     r = client.get("/demo")
     assert r.status_code == 200
     assert "ServiceRobot_AI Demo Hub" in r.text
-    for expected in ("/twin", "/api/ops-report?fmt=md", "/api/model-card", "/assets/twin_3d.gif"):
+    for expected in ("/twin", "/api/phm", "/api/ops-report?fmt=md", "/api/model-card", "/assets/twin_3d.gif"):
         assert expected in r.text
 
 
@@ -73,6 +75,25 @@ def test_snapshot_contract(client):
     for key in ("id", "x", "y", "ang", "floor", "status", "pred", "label", "conf"):
         assert key in a, f"AGV 응답에 {key} 누락 (3D 렌더가 의존)"
     assert a["status"] in ("ok", "warn")
+    assert {"stage", "severity", "risk_score", "rul_estimate_min", "reasons", "action"} <= a["phm"].keys()
+    assert 0 <= a["phm"]["risk_score"] <= 100
+
+
+def test_phm_forecast_endpoint(client):
+    r = client.get("/api/phm")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["schema"] == "fab.phm.forecast.v1"
+    assert {"current_fault", "predicted_fault", "watch", "normal", "max_risk_score"} <= body["summary"].keys()
+    assert body["assets"], "PHM forecast asset list must not be empty"
+    first = body["assets"][0]
+    assert {"id", "health", "trend_dir", "phm"} <= first.keys()
+    one = client.get("/api/phm", params={"agv": first["id"]})
+    assert one.status_code == 200
+    assert one.json()["assets"][0]["id"] == first["id"]
+    metrics = client.get("/metrics").text
+    assert "fab_phm_max_risk_score" in metrics
+    assert "fab_phm_predicted_fault_assets" in metrics
 
 
 def test_live_booster_inference_contract(client):
