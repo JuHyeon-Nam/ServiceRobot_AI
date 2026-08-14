@@ -82,3 +82,4 @@ def test_edge_contract_document_is_machine_readable():
     assert "{floor}" in contract["topic_pattern"] and "{agv_id}" in contract["topic_pattern"]
     assert "sensors" in contract["payload_required"]
     assert contract["qos"] == 1
+    assert contract["publisher_bridge"] == "src/mqtt_bridge.py"

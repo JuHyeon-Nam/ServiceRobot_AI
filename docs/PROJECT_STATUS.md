@@ -25,16 +25,17 @@ It should show four capabilities in one coherent demo:
 | Explainability and feature contract | Done | 100% |
 | 3D digital twin demo | Done | 100% |
 | Live inference in twin stream | Done | 100% |
-| MQTT-style edge telemetry contract | Done; real broker still optional | 70% |
+| MQTT-style edge telemetry contract | Done | 100% |
+| Optional MQTT broker bridge | Done; requires external broker and paho-mqtt for real publish | 85% |
 | Telemetry storage / history / rollup | Done | 100% |
 | Predictive maintenance work orders | Done | 100% |
 | PHM forecast contract | Done; heuristic RUL can be replaced by calibrated model | 85% |
 | Reliability, metrics, drift, model card | Done | 100% |
 | Portable deployment | Docker + compose done; local Docker unavailable here for manual run | 85% |
-| Physical/edge realism | MQTT-style contract done; real broker / external TSDB pending | 60% |
+| Physical/edge realism | MQTT contract + optional broker publisher done; external TSDB pending | 72% |
 | Demo packaging | Visual demo hub and reviewer walkthrough done; demo video still pending | 94% |
 
-Overall: **about 95% complete as a reviewable demo**, and **about 86% complete as
+Overall: **about 95% complete as a reviewable demo**, and **about 88% complete as
 a production-like robotics data platform**.
 
 ## What Is Already Demo-Ready
@@ -51,6 +52,8 @@ a production-like robotics data platform**.
   latency, call count, and replay audit fields.
 - `/api/edge-contract`, `/api/edge-events`: MQTT-compatible topic/payload
   schema and recent edge telemetry message buffer.
+- `src/mqtt_bridge.py`: optional publisher that reads `/api/snapshot` and sends
+  validated edge telemetry envelopes to a real MQTT broker, with dry-run support.
 - `/api/history`, `/api/stats`, `/api/trend`: telemetry persistence and analysis.
 - `/api/reliability`: MTBF, MTTR, availability.
 - `/api/work-orders`: predictive fault / low-health AGVs converted to P1-P3
@@ -68,12 +71,11 @@ a production-like robotics data platform**.
 |---|---|---|
 | P1 | Demo video, 2-3 minutes | Makes the project instantly reviewable in portfolio/resume contexts. |
 | P1 | README demo-video link and capture checklist | Turns the repository front page into a one-click visual review path. |
-| P2 | Real MQTT broker bridge | Replaces the in-process edge buffer with a broker subscriber/publisher. |
 | P2 | External time-series DB design or optional profile | Shows scaling path beyond SQLite. |
 | P3 | Physical robot or MQTT-fed sensor windows | Replaces the deterministic simulator windows with a real edge source. |
 
 ## Recommended Next Three Daily Commits
 
 1. `docs(demo): add video script and capture checklist`
-2. `feat(edge): add real MQTT broker bridge`
-3. `feat(data): add optional time-series db profile`
+2. `feat(data): add optional time-series db profile`
+3. `feat(edge): add mqtt-fed sensor replay input`

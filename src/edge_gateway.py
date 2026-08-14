@@ -34,7 +34,8 @@ def edge_contract() -> dict:
         "sensor_fields": list(REQUIRED_SENSOR_KEYS),
         "status_values": ["ok", "warn"],
         "consumer_path": "/api/edge-events",
-        "scale_up_path": "Replace the in-process buffer with a real MQTT broker subscriber.",
+        "publisher_bridge": "src/mqtt_bridge.py",
+        "scale_up_path": "Run mqtt_bridge.py against a broker, then add an external subscriber / time-series sink.",
     }
 
 

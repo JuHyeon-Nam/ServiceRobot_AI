@@ -1,7 +1,7 @@
 # ServiceRobot_AI
 
 서비스 로봇 및 FAB-style AGV 플릿을 대상으로 한 **실시간 예지보전(Predictive Maintenance) 시스템**입니다.
-LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간 스트리밍, Three.js 3D 디지털 트윈, MQTT-compatible 엣지 텔레메트리 계약, SQLite 시계열 저장소, 신뢰성 지표, 드리프트 모니터링, 정비 작업지시 큐를 하나의 실행 가능한 시스템으로 구성했습니다.
+LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간 스트리밍, Three.js 3D 디지털 트윈, MQTT-compatible 엣지 텔레메트리 계약, 선택형 MQTT broker bridge, SQLite 시계열 저장소, 신뢰성 지표, 드리프트 모니터링, 정비 작업지시 큐를 하나의 실행 가능한 시스템으로 구성했습니다.
 
 [![CI](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml/badge.svg)](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml)
 
@@ -60,7 +60,7 @@ LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간
 | 실시간 관제 | FastAPI + WebSocket + Three.js 3D twin (`/twin`) |
 | 시연 허브 | 주요 화면·운영 API·모델 산출물을 연결하는 데모 진입점 (`/demo`) |
 | PHM 예측 | 진단 추세, 건전도, 센서 임계 신호 기반 위험도/RUL 추정 (`/api/phm`) |
-| 엣지 텔레메트리 | MQTT-compatible topic/payload contract (`/api/edge-contract`, `/api/edge-events`) |
+| 엣지 텔레메트리 | MQTT-compatible topic/payload contract, optional broker publisher (`/api/edge-contract`, `/api/edge-events`, `mqtt_bridge.py`) |
 | 시계열 저장 | SQLite 이벤트 저장, 이력 조회, rollup, CSV export, retention |
 | 신뢰성/리스크 지표 | MTBF, MTTR, availability, floor별 운영 risk 분석 (`/api/reliability`, `/api/fleet-risk`) |
 | AI 운영 | 데이터 QA, 드리프트 감지, 모델 카드, Prometheus metrics |
@@ -82,6 +82,7 @@ flowchart LR
     twin --> ws["WebSocket /ws"]
     twin --> ui["Three.js twin /twin"]
     twin --> edge["MQTT-style edge buffer<br/>/api/edge-events"]
+    edge --> broker["Optional MQTT broker bridge<br/>mqtt_bridge.py"]
     twin --> store["SQLite telemetry store"]
     store --> ops["stats / history / trend / reliability / fleet risk"]
     twin --> phm["PHM forecast<br/>/api/phm"]
@@ -147,6 +148,7 @@ Feature engineering:
 | Realtime server | `src/realtime_server.py` | `/twin`, `/ws`, operational API 제공 |
 | FAB layout | `src/fab_layout.py` | 층, 장비, 트랙, AGV 경로 정의 |
 | Edge gateway | `src/edge_gateway.py` | AGV 상태를 MQTT-compatible telemetry envelope로 변환 |
+| MQTT bridge | `src/mqtt_bridge.py` | `/api/snapshot`을 읽어 실제 MQTT broker로 telemetry publish |
 | Telemetry store | `src/telemetry_store.py` | warning/low-health 이벤트 저장 및 집계 |
 | Work-order store | `src/work_order_store.py` | 예측정비 작업지시 생성, 상태, SLA 관리 |
 | Data quality monitor | `src/dataset_quality.py` | schema, annotation, QA, ingest metric 계산 |
@@ -249,6 +251,22 @@ POST /predict
 |---|---|
 | `GET /api/edge-contract` | MQTT-compatible topic and payload schema |
 | `GET /api/edge-events?limit=50` | Recent edge telemetry messages |
+
+Optional broker publisher:
+
+```bash
+# Terminal 1
+cd src
+uvicorn realtime_server:app --reload
+
+# Terminal 2, repository root: broker 없이 topic/payload publish 계획만 검증
+python src/mqtt_bridge.py --once --dry-run
+
+# Terminal 2, repository root: 실제 broker publish
+python src/mqtt_bridge.py --host 127.0.0.1 --port 1883
+```
+
+`paho-mqtt`가 설치되어 있어야 실제 broker publish가 동작합니다. `--dry-run`은 broker와 추가 의존성 없이 snapshot을 MQTT publish 이벤트로 변환해 검증합니다.
 
 Topic pattern:
 
