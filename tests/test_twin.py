@@ -43,7 +43,8 @@ def test_demo_hub_page_served(client):
     r = client.get("/demo")
     assert r.status_code == 200
     assert "ServiceRobot_AI Demo Hub" in r.text
-    for expected in ("/twin", "/api/phm", "/api/ops-report?fmt=md", "/api/model-card", "/assets/twin_3d.gif"):
+    for expected in ("/twin", "/api/phm", "/api/tsdb-export?fmt=influx",
+                     "/api/ops-report?fmt=md", "/api/model-card", "/assets/twin_3d.gif"):
         assert expected in r.text
 
 
@@ -418,6 +419,26 @@ def test_trend_endpoint_and_csv_export(client):
     assert r.status_code == 200
     assert "text/csv" in r.headers["content-type"]
     assert r.text.splitlines()[0] == "ts,pred,conf,level,health,vib,batt,temp"
+
+
+def test_tsdb_export_endpoints(client):
+    """C9: 외부 TSDB 확장 계약 — Influx line protocol / Timescale SQL export."""
+    contract = client.get("/api/tsdb-contract").json()
+    assert contract["schema"] == "fab.telemetry.tsdb_export.v1"
+    assert contract["supported_formats"] == ["json", "influx", "timescale"]
+
+    influx = client.get("/api/tsdb-export", params={"fmt": "influx", "limit": 5})
+    assert influx.status_code == 200
+    assert "text/plain" in influx.headers["content-type"]
+    assert "robot_pdm_events" in influx.text
+
+    sql = client.get("/api/tsdb-export", params={"fmt": "timescale", "limit": 5})
+    assert sql.status_code == 200
+    assert "application/sql" in sql.headers["content-type"]
+    assert "CREATE TABLE IF NOT EXISTS robot_pdm_events" in sql.text
+
+    bad = client.get("/api/tsdb-export", params={"fmt": "unknown"})
+    assert bad.status_code == 400
 
 
 def test_data_quality_endpoint(client):

@@ -1,7 +1,7 @@
 # ServiceRobot_AI
 
 서비스 로봇 및 FAB-style AGV 플릿을 대상으로 한 **실시간 예지보전(Predictive Maintenance) 시스템**입니다.
-LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간 스트리밍, Three.js 3D 디지털 트윈, MQTT-compatible 엣지 텔레메트리 계약, 선택형 MQTT broker bridge, SQLite 시계열 저장소, 신뢰성 지표, 드리프트 모니터링, 정비 작업지시 큐를 하나의 실행 가능한 시스템으로 구성했습니다.
+LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간 스트리밍, Three.js 3D 디지털 트윈, MQTT-compatible 엣지 텔레메트리 계약, 선택형 MQTT broker bridge, SQLite 시계열 저장소, 외부 TSDB export, 신뢰성 지표, 드리프트 모니터링, 정비 작업지시 큐를 하나의 실행 가능한 시스템으로 구성했습니다.
 
 [![CI](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml/badge.svg)](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml)
 
@@ -61,7 +61,7 @@ LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간
 | 시연 허브 | 주요 화면·운영 API·모델 산출물을 연결하는 데모 진입점 (`/demo`) |
 | PHM 예측 | 진단 추세, 건전도, 센서 임계 신호 기반 위험도/RUL 추정 (`/api/phm`) |
 | 엣지 텔레메트리 | MQTT-compatible topic/payload contract, optional broker publisher (`/api/edge-contract`, `/api/edge-events`, `mqtt_bridge.py`) |
-| 시계열 저장 | SQLite 이벤트 저장, 이력 조회, rollup, CSV export, retention |
+| 시계열 저장 | SQLite 이벤트 저장, 이력 조회, rollup, CSV/Influx/Timescale export, retention |
 | 신뢰성/리스크 지표 | MTBF, MTTR, availability, floor별 운영 risk 분석 (`/api/reliability`, `/api/fleet-risk`) |
 | AI 운영 | 데이터 QA, 드리프트 감지, 모델 카드, Prometheus metrics |
 | 운영 리포트 | fleet/risk/work-order/drift/reliability/model 요약 및 교대 인수인계 Markdown export (`/api/ops-report`, `/api/shift-handover`) |
@@ -85,6 +85,7 @@ flowchart LR
     edge --> broker["Optional MQTT broker bridge<br/>mqtt_bridge.py"]
     twin --> store["SQLite telemetry store"]
     store --> ops["stats / history / trend / reliability / fleet risk"]
+    store --> tsdb["External TSDB export<br/>/api/tsdb-export"]
     twin --> phm["PHM forecast<br/>/api/phm"]
     twin --> work["work-order queue<br/>/api/work-orders"]
     twin --> metrics["Prometheus /metrics"]
@@ -150,6 +151,7 @@ Feature engineering:
 | Edge gateway | `src/edge_gateway.py` | AGV 상태를 MQTT-compatible telemetry envelope로 변환 |
 | MQTT bridge | `src/mqtt_bridge.py` | `/api/snapshot`을 읽어 실제 MQTT broker로 telemetry publish |
 | Telemetry store | `src/telemetry_store.py` | warning/low-health 이벤트 저장 및 집계 |
+| TSDB export | `src/tsdb_export.py` | SQLite 이벤트를 InfluxDB line protocol / TimescaleDB SQL로 변환 |
 | Work-order store | `src/work_order_store.py` | 예측정비 작업지시 생성, 상태, SLA 관리 |
 | Data quality monitor | `src/dataset_quality.py` | schema, annotation, QA, ingest metric 계산 |
 | Drift monitor | `src/drift_monitor.py` | live telemetry와 기준 운전 profile 비교 |
@@ -237,6 +239,9 @@ POST /predict
 | `GET /api/history?agv=AGV-03&fmt=csv` | AGV별 이벤트 CSV export |
 | `GET /api/stats` | level, floor, asset, health 기준 session aggregate |
 | `GET /api/trend?bucket=60&n=15` | 시간 bucket rollup |
+| `GET /api/tsdb-contract` | External TSDB export contract |
+| `GET /api/tsdb-export?fmt=influx` | InfluxDB line protocol export |
+| `GET /api/tsdb-export?fmt=timescale` | TimescaleDB schema + insert SQL export |
 | `GET /api/reliability` | Fleet MTBF, MTTR, availability, worst assets |
 | `GET /api/reliability?agv=AGV-03` | AGV 단위 reliability metrics |
 | `GET /api/fleet-risk` | Floor별 운영 risk, bottleneck floor, 우선 대응 asset |
@@ -386,11 +391,12 @@ ServiceRobot_AI/
 - Realtime twin은 합성된 30-step window를 live LightGBM inference 경로로 통과시킵니다.
 - SQLite는 local demo와 compact deployment를 위한 기본 저장소입니다.
 - MQTT-compatible edge telemetry contract는 실제 broker 및 외부 time-series DB로 확장하기 위한 경계입니다.
+- `/api/tsdb-export`는 SQLite 이벤트를 InfluxDB line protocol 또는 TimescaleDB SQL로 변환해 외부 TSDB 적재 경로를 검증합니다.
 - Prometheus metrics는 fleet 상태, 운영 risk score, inference latency, edge ingest, drift, reliability, telemetry volume, work-order SLA를 노출합니다.
 
 ## Limitations
 
 - Live digital twin은 replay trajectory와 deterministic sensor-window synthesis를 사용합니다.
 - Rare fault class는 validation support가 낮아 aggregate accuracy보다 per-class reliability가 약합니다.
-- SQLite는 compact runtime에는 적합하지만 고빈도 telemetry production workload에는 broker + time-series DB가 필요합니다.
+- SQLite는 compact runtime에는 적합하지만 고빈도 telemetry production workload에는 broker + time-series DB가 필요합니다. 현재는 InfluxDB/TimescaleDB export 계약까지 제공합니다.
 - 3D twin은 operational simulation이며 실제 공장 layout calibration을 거친 모델은 아닙니다.

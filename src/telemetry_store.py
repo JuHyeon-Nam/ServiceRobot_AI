@@ -75,6 +75,15 @@ class TelemetryStore:
             cols = [c[0] for c in cur.description]
             return [dict(zip(cols, r)) for r in cur.fetchall()]
 
+    def events(self, limit: int = 1000, since: float = 0.0) -> list:
+        """외부 TSDB export용 최근 이벤트 목록(최신순)."""
+        with self.lock:
+            cur = self.cx.execute(
+                "SELECT ts,agv,floor,pred,conf,level,health,vib,batt,temp FROM events "
+                "WHERE ts>=? ORDER BY ts DESC LIMIT ?", (since, limit))
+            cols = [c[0] for c in cur.description]
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+
     def trend(self, bucket_sec: int = 60, buckets: int = 15) -> list:
         """시간 버킷 롤업(다운샘플링): 버킷별 이벤트 수·평균 건전도·등급별 집계.
         시계열DB의 continuous aggregate 개념을 경량 구현 — 관제 추이 차트의 데이터 소스.

@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 import fab_layout as FL
 from telemetry_store import TelemetryStore
+from tsdb_export import export_payload, tsdb_contract
 from dataset_quality import RoboticsDataQualityMonitor, records_from_agv_snapshot
 from drift_monitor import DataDriftMonitor
 from edge_gateway import EdgeGateway, edge_contract
@@ -402,6 +403,26 @@ def api_stats():
 def api_trend(bucket: int = 60, n: int = 15):
     """시간 버킷 롤업(다운샘플링) — 버킷별 이벤트·평균건전도·등급 집계. 관제 추이 차트 소스."""
     return JSONResponse(STORE.trend(min(max(bucket, 10), 3600), min(max(n, 2), 120)))
+
+
+@app.get("/api/tsdb-contract")
+def api_tsdb_contract():
+    """외부 시계열 DB 확장 계약: InfluxDB line protocol / TimescaleDB SQL export."""
+    return JSONResponse(tsdb_contract())
+
+
+@app.get("/api/tsdb-export")
+def api_tsdb_export(fmt: str = "json", limit: int = 500, since: float = 0.0):
+    """SQLite telemetry events를 외부 TSDB 적재 포맷으로 export."""
+    rows = STORE.events(limit=min(max(limit, 1), 5000), since=max(since, 0.0))
+    if not rows:
+        STORE.record(time.time(), snapshot()["agvs"])
+        rows = STORE.events(limit=min(max(limit, 1), 5000), since=max(since, 0.0))
+    try:
+        body, media_type = export_payload(rows, fmt=fmt)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return PlainTextResponse(body, media_type=media_type)
 
 
 @app.get("/api/reliability")
