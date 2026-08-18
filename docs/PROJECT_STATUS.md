@@ -23,7 +23,7 @@ It should show four capabilities in one coherent demo:
 |---|---|---:|
 | Core PdM model and honest validation | Done | 100% |
 | Explainability and feature contract | Done | 100% |
-| 3D digital twin demo | Done | 100% |
+| 3D digital twin demo | Done; slower replay, light high-legibility UI, normal/warning AGV click focus | 100% |
 | Live inference in twin stream | Done | 100% |
 | MQTT-style edge telemetry contract | Done | 100% |
 | Optional MQTT broker bridge | Done; requires external broker and paho-mqtt for real publish | 85% |
@@ -48,6 +48,8 @@ a production-like robotics data platform**.
 - `/`: 2D control center for KPI, alert feed, and fleet status scanning.
 - `/ws`: live fleet state stream.
 - `/api/snapshot`: current AGV state, KPI, and per-asset PHM forecast contract.
+- `/api/data-source`: explicit disclosure of AI-Hub replay, live LightGBM inference,
+  rule-based PHM/RUL, Edge TTL input, and physical-robot connection status.
 - `/api/phm`: PHM forecast summary with stage, severity, risk score, RUL estimate,
   reasons, and recommended action.
 - `/api/snapshot` inference block: live LightGBM Booster mode, feature count,
@@ -78,7 +80,7 @@ a production-like robotics data platform**.
 | P1 | Demo video, 2-3 minutes | Makes the project instantly reviewable in portfolio/resume contexts. |
 | P1 | README demo-video link and capture checklist | Turns the repository front page into a one-click visual review path. |
 | P2 | Broker subscriber runner | Bridges a real MQTT subscriber into `/api/edge-ingest` continuously. |
-| P3 | Physical robot sensor source | Replaces test payloads with an actual robot or edge device source. |
+| P3 | Physical robot sensor source | Replaces controlled replay windows with an actual robot or edge-device source. |
 
 ## Recommended Next Three Daily Commits
 

@@ -139,6 +139,20 @@ Feature engineering:
 
 좌표 `x`, `y`는 사이트 좌표계 암기를 줄이기 위해 모델 입력에서 제외하고, 관제/디지털 트윈 시각화 좌표로만 사용합니다.
 
+### 데이터 출처와 실시간 범위
+
+이 데모는 데이터와 AI의 경계를 명확히 공개합니다. 원본 학습 데이터는 **AI-Hub 실내공간 유지관리 서비스 로봇 JSON**이며, 저장소에는 재배포가 어려운 원본 대신 전처리된 replay metadata와 학습된 모델 artifact만 포함합니다.
+
+| 구간 | 현재 구현 | 의미 |
+|---|---|---|
+| 3D 이동 | 결정론적 trajectory replay, 약 63초에 한 바퀴 | 화면 시연이 매번 재현되고 실제 설비처럼 천천히 이동 |
+| 센서 window | replay 상태를 바탕으로 만든 30-step runtime window | 현재는 물리 로봇 센서 스트림이 아닌 제어 가능한 데모 입력 |
+| 고장 진단 | 매 snapshot마다 LightGBM Booster 실시간 추론 | 9-class 고장 코드와 신뢰도는 규칙이 아닌 모델 출력 |
+| PHM 위험도/RUL | 건전도·추세·센서 신호 기반 heuristic | 현장 고장 시각으로 보정한 RUL 회귀모델로 교체 가능한 인터페이스 |
+| 외부 입력 | `POST /api/edge-ingest` -> WebSocket `/ws` -> 3D twin | MQTT-compatible payload를 즉시 반영하며 기본 10초 TTL 적용 |
+
+따라서 현재 화면은 **AI 추론이 포함된 replay 기반 디지털 트윈**입니다. 실제 MQTT broker에서 지속 수신하는 subscriber와 물리 로봇 센서 연결은 다음 확장 단계이며, 지금도 외부 edge payload를 주입하면 해당 AGV의 3D 색상, 클릭 패널, PHM 위험도가 즉시 바뀝니다. 데이터 출처와 적용 범위는 `/api/data-source`와 `/api/model-card`에서도 확인할 수 있습니다.
+
 ## Runtime Components
 
 | Component | File | Responsibility |
@@ -230,6 +244,7 @@ POST /predict
 | `WS /ws` | Live fleet state stream |
 | `GET /api/layout` | FAB floor/equipment/track layout |
 | `GET /api/snapshot` | Current AGV state, KPIs, inference metadata, alerts |
+| `GET /api/data-source` | Replay, live-model, rule-based PHM, edge-ingest boundaries |
 | `GET /api/phm` | AGV별 PHM forecast, risk score, RUL estimate, action |
 | `GET /api/phm?agv=AGV-03` | Single AGV PHM forecast |
 

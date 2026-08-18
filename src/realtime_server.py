@@ -225,6 +225,9 @@ for rid in robots:
 PLAN = FL.build_agv_plan(robots)
 LAYOUT = FL.build_layout()
 P = {"v": 0.0}     # 전역 진행도(0~1 순환)
+REPLAY_TICK_SEC = 0.05
+REPLAY_PROGRESS_PER_TICK = max(float(os.environ.get("REPLAY_PROGRESS_PER_TICK", "0.0008")), 0.0001)
+REPLAY_CYCLE_SEC = round(REPLAY_TICK_SEC / REPLAY_PROGRESS_PER_TICK, 1)
 # 시계열 데이터 계층(진단 이벤트 적재/집계/조회). 기본 인메모리, TELEMETRY_DB로 파일 durable.
 STORE = TelemetryStore(os.environ.get("TELEMETRY_DB", ":memory:"))
 WORK_ORDERS = WorkOrderStore(os.environ.get("WORK_ORDER_DB", os.environ.get("TELEMETRY_DB", ":memory:")))
@@ -238,6 +241,19 @@ REVIEWER_BRIEF = build_reviewer_brief()
 BOOSTER, MODEL_META, DATASET_META = load_runtime(DATA)
 LIVE_CACHE = {}
 LIVE_INFER = {"calls": 0, "cache_hits": 0, "last_latency_ms": 0.0}
+DATA_SOURCE = {
+    "dataset": "AI-Hub service robot telemetry replay",
+    "runtime": "deterministic replay trajectory + synthesized 30-step sensor window + live LightGBM Booster inference",
+    "replay_motion": {
+        "mode": "deterministic trajectory replay",
+        "estimated_cycle_sec": REPLAY_CYCLE_SEC,
+        "progress_per_tick": REPLAY_PROGRESS_PER_TICK,
+    },
+    "edge_ingest": f"POST /api/edge-ingest can override a live AGV state for {EDGE_INPUT_TTL_SEC:g} seconds",
+    "streaming": "WebSocket /ws publishes each refreshed snapshot to the twin",
+    "rule_based_parts": ["3D route animation", "PHM risk/RUL heuristic"],
+    "model_based_parts": ["9-class fault diagnosis", "prediction confidence", "live inference metadata"],
+}
 
 
 def live_diagnosis(a: dict, t: dict, i: int, x: float, y: float, ang: float) -> dict:
@@ -347,10 +363,12 @@ def snapshot():
     deteriorating = sum(a["trend_dir"] == "악화" for a in agvs)   # B2: 악화 추세(드리프트) 대수
     maint_due = sum(a["health"] < 55 for a in agvs)              # B4: 정비 필요(건전도<55) 대수
     avg_health = round(sum(a["health"] for a in agvs) / max(len(agvs), 1))
+    edge_active = sum(1 for a in agvs if a["edge_input"]["active"])
     return {"type": "state", "p": round(p, 4), "agvs": agvs,
             "kpi": {"total": len(PLAN), "ok": len(PLAN) - w, "warn": w,
                     "per_floor": per, "by_level": by_level, "deteriorating": deteriorating,
                     "maint_due": maint_due, "avg_health": avg_health},
+            "data_source": dict(DATA_SOURCE, edge_active=edge_active),
             "inference": {"mode": "live_booster", "model_id": MODEL_CARD["model_id"],
                           "calls": LIVE_INFER["calls"], "cache_hits": LIVE_INFER["cache_hits"],
                           "last_latency_ms": LIVE_INFER["last_latency_ms"],
@@ -363,7 +381,7 @@ async def _advance():
     async def loop():
         tick = 0
         while True:
-            P["v"] = (P["v"] + 0.0035) % 1.0
+            P["v"] = (P["v"] + REPLAY_PROGRESS_PER_TICK) % 1.0
             tick += 1
             if tick % 10 == 0:                         # ~2Hz로 진단 이벤트 시계열 적재
                 now = time.time()
@@ -385,6 +403,18 @@ def api_layout():
 @app.get("/api/snapshot")
 def api_snapshot():
     return JSONResponse(snapshot())
+
+
+@app.get("/api/data-source")
+def api_data_source():
+    """데모 데이터의 출처와 AI/규칙 기반 경계를 명시적으로 공개한다."""
+    active_edges = sum(_edge_override(agv_id) is not None for agv_id in list(EDGE_INPUTS))
+    return JSONResponse(dict(
+        DATA_SOURCE,
+        edge_active=active_edges,
+        edge_input_ttl_sec=EDGE_INPUT_TTL_SEC,
+        physical_robot_connected=False,
+    ))
 
 
 @app.get("/api/phm")

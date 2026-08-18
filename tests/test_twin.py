@@ -36,6 +36,11 @@ def test_twin_phm_patrol_cues(client):
     assert "PHM 위험도" in r.text
     assert "예상 대응시점" in r.text
     assert "Edge 입력" in r.text
+    assert "데이터 출처" in r.text
+    assert "sourceStat" in r.text
+    assert "focus = agvMesh" in r.text
+    assert "#sel { position:fixed" in r.text
+    assert "#title p { display:none; }" in r.text
     assert "phmStage" in r.text
     assert "autoRotate" in r.text
 
@@ -73,6 +78,7 @@ def test_snapshot_contract(client):
     assert s["inference"]["mode"] == "live_booster"
     assert s["inference"]["n_features"] == 249
     assert s["inference"]["calls"] > 0
+    assert {"dataset", "runtime", "rule_based_parts", "model_based_parts", "edge_active"} <= s["data_source"].keys()
     assert s["agvs"], "AGV 목록이 비면 안 됨"
     a = s["agvs"][0]
     for key in ("id", "x", "y", "ang", "floor", "status", "pred", "label", "conf"):
@@ -80,6 +86,16 @@ def test_snapshot_contract(client):
     assert a["status"] in ("ok", "warn")
     assert {"stage", "severity", "risk_score", "rul_estimate_min", "reasons", "action"} <= a["phm"].keys()
     assert 0 <= a["phm"]["risk_score"] <= 100
+
+
+def test_data_source_endpoint_exposes_demo_boundaries(client):
+    """시연 replay, 실제 모델 추론, 규칙 기반 PHM의 경계를 API로 확인할 수 있어야 한다."""
+    body = client.get("/api/data-source").json()
+    assert body["dataset"].startswith("AI-Hub")
+    assert body["physical_robot_connected"] is False
+    assert body["replay_motion"]["estimated_cycle_sec"] >= 10
+    assert "PHM risk/RUL heuristic" in body["rule_based_parts"]
+    assert "9-class fault diagnosis" in body["model_based_parts"]
 
 
 def test_phm_forecast_endpoint(client):
