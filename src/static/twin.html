@@ -185,6 +185,7 @@
     <div class="row"><span>PHM 단계</span><span id="selPhm" class="badge">–</span></div>
     <div class="row"><span>PHM 위험도</span><span id="selPhmRisk">–</span></div>
     <div class="row"><span>예상 대응시점</span><span id="selRul">–</span></div>
+    <div class="row"><span>Edge 입력</span><span id="selEdge" class="badge">–</span></div>
     <div class="row"><span>건전도(Health)</span><span id="selHealth">–</span></div>
     <div class="hbar"><i id="selHealthBar"></i></div>
     <div class="row"><span>정비 권고</span><span id="selAdvice" class="badge">–</span></div>
@@ -568,6 +569,11 @@ function showSel(a) {
     phmData.rul_estimate_min === 0 ? '즉시'
     : phmData.rul_estimate_min ? `${phmData.rul_estimate_min}분 이내 점검 권장`
     : '정상 범위';
+  const edge = document.getElementById('selEdge');
+  const edgeActive = a.edge_input && a.edge_input.active;
+  edge.textContent = edgeActive ? `수신됨 · ${a.edge_input.age_sec}s` : '내부 replay';
+  edge.style.background = edgeActive ? '#183b5b' : '#1d4a2c';
+  edge.style.color = edgeActive ? '#b9dcff' : '#bff0cf';
   // B4: 자산 건전도(Health Index) + 정비 트리아지 권고
   const h = a.health ?? 100;
   document.getElementById('selHealth').textContent = h + ' / 100';

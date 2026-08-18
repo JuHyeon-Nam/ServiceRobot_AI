@@ -60,7 +60,7 @@ LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간
 | 실시간 관제 | FastAPI + WebSocket + Three.js 3D twin (`/twin`) |
 | 시연 허브 | 주요 화면·운영 API·모델 산출물을 연결하는 데모 진입점 (`/demo`) |
 | PHM 예측 | 진단 추세, 건전도, 센서 임계 신호 기반 위험도/RUL 추정 (`/api/phm`) |
-| 엣지 텔레메트리 | MQTT-compatible topic/payload contract, optional broker publisher (`/api/edge-contract`, `/api/edge-events`, `mqtt_bridge.py`) |
+| 엣지 텔레메트리 | MQTT-compatible topic/payload contract, optional broker publisher, inbound edge ingest (`/api/edge-contract`, `/api/edge-events`, `/api/edge-ingest`, `mqtt_bridge.py`) |
 | 시계열 저장 | SQLite 이벤트 저장, 이력 조회, rollup, CSV/Influx/Timescale export, retention |
 | 신뢰성/리스크 지표 | MTBF, MTTR, availability, floor별 운영 risk 분석 (`/api/reliability`, `/api/fleet-risk`) |
 | AI 운영 | 데이터 QA, 드리프트 감지, 모델 카드, Prometheus metrics |
@@ -83,6 +83,8 @@ flowchart LR
     twin --> ui["Three.js twin /twin"]
     twin --> edge["MQTT-style edge buffer<br/>/api/edge-events"]
     edge --> broker["Optional MQTT broker bridge<br/>mqtt_bridge.py"]
+    broker --> ingest["Inbound edge ingest<br/>/api/edge-ingest"]
+    ingest --> twin
     twin --> store["SQLite telemetry store"]
     store --> ops["stats / history / trend / reliability / fleet risk"]
     store --> tsdb["External TSDB export<br/>/api/tsdb-export"]
@@ -256,6 +258,7 @@ POST /predict
 |---|---|
 | `GET /api/edge-contract` | MQTT-compatible topic and payload schema |
 | `GET /api/edge-events?limit=50` | Recent edge telemetry messages |
+| `POST /api/edge-ingest` | Validate inbound edge/MQTT payload and apply it to live twin snapshot for a short TTL |
 
 Optional broker publisher:
 
@@ -272,6 +275,16 @@ python src/mqtt_bridge.py --host 127.0.0.1 --port 1883
 ```
 
 `paho-mqtt`가 설치되어 있어야 실제 broker publish가 동작합니다. `--dry-run`은 broker와 추가 의존성 없이 snapshot을 MQTT publish 이벤트로 변환해 검증합니다.
+
+Inbound replay injection:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/edge-ingest \
+  -H "Content-Type: application/json" \
+  -d '{"schema":"fab.edge.telemetry.v1","ts":0,"site":"demo-fab","line":"service-robot-ai","asset_id":"AGV-01","floor":0,"position":{"x":120,"y":80,"heading_deg":90},"sensors":{"vib":9.9,"batt":41.0,"temp":66.0},"diagnosis":{"status":"warn","fault":"E-RBT-S","label":"센서 이상","confidence":0.96,"level":"위험","trend":"악화"},"health":{"index":22,"advice":"정비 필요 · 우선 대응"},"source":{"inference_mode":"mqtt_ingest","latency_ms":0,"replay_fault":"E-RBT-S"}}'
+```
+
+수신된 payload는 기본 10초 동안 `/api/snapshot`과 `/twin` 클릭 패널의 `Edge 입력`, 센서값, PHM 위험도에 반영됩니다.
 
 Topic pattern:
 

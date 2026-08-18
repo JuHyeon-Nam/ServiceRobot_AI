@@ -35,6 +35,7 @@ def test_twin_phm_patrol_cues(client):
     assert "PHM 단계" in r.text
     assert "PHM 위험도" in r.text
     assert "예상 대응시점" in r.text
+    assert "Edge 입력" in r.text
     assert "phmStage" in r.text
     assert "autoRotate" in r.text
 
@@ -44,7 +45,8 @@ def test_demo_hub_page_served(client):
     assert r.status_code == 200
     assert "ServiceRobot_AI Demo Hub" in r.text
     for expected in ("/twin", "/api/phm", "/api/tsdb-export?fmt=influx",
-                     "/api/ops-report?fmt=md", "/api/model-card", "/assets/twin_3d.gif"):
+                     "/api/edge-ingest", "/api/ops-report?fmt=md",
+                     "/api/model-card", "/assets/twin_3d.gif"):
         assert expected in r.text
 
 
@@ -405,8 +407,48 @@ def test_edge_gateway_endpoint_contract(client):
 
     m = client.get("/metrics").text
     for name in ("fab_edge_messages_total", "fab_edge_buffered_messages",
-                 "fab_edge_active_topics", "fab_edge_invalid_messages"):
+                 "fab_edge_active_topics", "fab_edge_invalid_messages",
+                 "fab_edge_ingested_messages"):
         assert f"# TYPE {name} gauge" in m and f"\n{name} " in m, f"{name} 메트릭 누락"
+
+
+def test_edge_ingest_overrides_snapshot_for_mqtt_fed_replay(client):
+    """C8: 외부 MQTT-fed payload가 짧은 TTL 동안 3D snapshot/PHM에 반영되어야 함."""
+    import time
+    from edge_gateway import payload_from_agv
+    from realtime_server import EDGE_INPUTS
+
+    base = client.get("/api/snapshot").json()["agvs"][0]
+    payload = payload_from_agv(time.time(), base)
+    payload["diagnosis"].update({
+        "status": "warn",
+        "fault": "E-RBT-S",
+        "label": "센서 이상",
+        "confidence": 0.96,
+        "level": "위험",
+        "trend": "악화",
+    })
+    payload["sensors"] = {"vib": 9.9, "batt": 41.0, "temp": 66.0}
+    payload["health"] = {"index": 22, "advice": "정비 필요 · 우선 대응"}
+
+    try:
+        r = client.post("/api/edge-ingest", json=payload)
+        assert r.status_code == 200
+        assert r.json()["accepted"] is True
+
+        snap = client.get("/api/snapshot").json()
+        asset = next(a for a in snap["agvs"] if a["id"] == base["id"])
+        assert asset["edge_input"]["active"] is True
+        assert asset["pred"] == "E-RBT-S"
+        assert asset["sensors"] == {"vib": 9.9, "batt": 41.0, "temp": 66.0}
+        assert asset["health"] == 22
+        assert asset["phm"]["stage"] == "current_fault"
+
+        bad = client.post("/api/edge-ingest", json={"schema": "broken"})
+        assert bad.status_code == 400
+        assert bad.json()["accepted"] is False
+    finally:
+        EDGE_INPUTS.clear()
 
 
 def test_trend_endpoint_and_csv_export(client):

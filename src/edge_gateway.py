@@ -34,8 +34,9 @@ def edge_contract() -> dict:
         "sensor_fields": list(REQUIRED_SENSOR_KEYS),
         "status_values": ["ok", "warn"],
         "consumer_path": "/api/edge-events",
+        "ingest_path": "/api/edge-ingest",
         "publisher_bridge": "src/mqtt_bridge.py",
-        "scale_up_path": "Run mqtt_bridge.py against a broker, then add an external subscriber / time-series sink.",
+        "scale_up_path": "Run mqtt_bridge.py against a broker, then POST subscribed broker payloads to /api/edge-ingest.",
     }
 
 
@@ -65,6 +66,7 @@ def payload_from_agv(ts: float, agv: dict) -> dict:
         "health": {
             "index": agv.get("health"),
             "advice": agv.get("advice"),
+            "phm": agv.get("phm"),
         },
         "source": {
             "inference_mode": agv.get("inference_mode", "live_booster"),
@@ -102,6 +104,7 @@ class EdgeGateway:
         self.events = deque(maxlen=max_messages)
         self.total_messages = 0
         self.invalid_messages = 0
+        self.ingested_messages = 0
         self.topic_counts: Counter[str] = Counter()
         self.last_ts: float | None = None
 
@@ -112,6 +115,7 @@ class EdgeGateway:
             issues = validate_payload(payload)
             event = {
                 "topic": topic_for(payload["floor"], payload["asset_id"]),
+                "direction": "outbound",
                 "qos": 1,
                 "retain": False,
                 "payload": payload,
@@ -127,6 +131,27 @@ class EdgeGateway:
             self.last_ts = payload["ts"]
         return accepted
 
+    def ingest_payload(self, payload: dict, topic: str | None = None) -> dict:
+        """Validate and buffer an inbound edge/MQTT telemetry payload."""
+        issues = validate_payload(payload)
+        event = {
+            "topic": topic or topic_for(payload.get("floor", 0), payload.get("asset_id", "unknown")),
+            "direction": "inbound",
+            "qos": 1,
+            "retain": False,
+            "payload": deepcopy(payload),
+            "validation": {"ok": not issues, "issues": issues},
+        }
+        if issues:
+            self.invalid_messages += 1
+        else:
+            self.ingested_messages += 1
+        self.events.append(event)
+        self.total_messages += 1
+        self.topic_counts[event["topic"]] += 1
+        self.last_ts = payload.get("ts")
+        return deepcopy(event)
+
     def recent(self, limit: int = 50, topic_prefix: str | None = None) -> list[dict]:
         rows = list(reversed(self.events))
         if topic_prefix:
@@ -140,5 +165,6 @@ class EdgeGateway:
             "buffered_messages": len(self.events),
             "active_topics": len(self.topic_counts),
             "invalid_messages": self.invalid_messages,
+            "ingested_messages": self.ingested_messages,
             "last_ts": self.last_ts,
         }

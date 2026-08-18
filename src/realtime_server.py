@@ -229,6 +229,8 @@ P = {"v": 0.0}     # 전역 진행도(0~1 순환)
 STORE = TelemetryStore(os.environ.get("TELEMETRY_DB", ":memory:"))
 WORK_ORDERS = WorkOrderStore(os.environ.get("WORK_ORDER_DB", os.environ.get("TELEMETRY_DB", ":memory:")))
 EDGE = EdgeGateway(max_messages=int(os.environ.get("EDGE_BUFFER_SIZE", "1000")))
+EDGE_INPUT_TTL_SEC = float(os.environ.get("EDGE_INPUT_TTL_SEC", "10"))
+EDGE_INPUTS = {}
 QUALITY = RoboticsDataQualityMonitor()
 DRIFT = DataDriftMonitor()
 MODEL_CARD = build_model_card(DATA)
@@ -276,8 +278,20 @@ def live_diagnosis(a: dict, t: dict, i: int, x: float, y: float, ang: float) -> 
     return out
 
 
+def active_edge_input(agv_id: str, now: float) -> dict | None:
+    row = EDGE_INPUTS.get(agv_id)
+    if not row:
+        return None
+    age = now - row["ingested_at"]
+    if age > EDGE_INPUT_TTL_SEC:
+        EDGE_INPUTS.pop(agv_id, None)
+        return None
+    return {"payload": row["payload"], "age_sec": round(age, 2)}
+
+
 def snapshot():
     p = P["v"]; agvs = []; per = [0, 0, 0]; alerts = []
+    now = time.time()
     for a in PLAN:
         t = TRAJ[a["robot"]]; n = t["n"]
         i = int(((p + a.get("toff", 0.0)) % 1.0) * (n - 1))    # AGV별 시점 오프셋 → 고장 분산
@@ -285,9 +299,21 @@ def snapshot():
         x, y, ang = a["route"].at(s)
         diag = live_diagnosis(a, t, i, x, y, ang)
         pred = diag["pred"]; warn = pred != "정상"
-        per[a["floor"]] += int(warn)
         conf = diag["conf"]
         level = alert_level(conf) if warn else None
+        edge_input = active_edge_input(a["id"], now)
+        edge_payload = edge_input["payload"] if edge_input else None
+        if edge_payload:
+            d = edge_payload.get("diagnosis") or {}
+            pos = edge_payload.get("position") or {}
+            pred = d.get("fault") or pred
+            warn = (d.get("status") == "warn") or pred != "정상"
+            conf = round(float(d.get("confidence", conf)), 3)
+            level = d.get("level") or (alert_level(conf) if warn else None)
+            x = pos.get("x", x) if pos.get("x") is not None else x
+            y = pos.get("y", y) if pos.get("y") is not None else y
+            ang = pos.get("heading_deg", ang) if pos.get("heading_deg") is not None else ang
+        per[a["floor"]] += int(warn)
         lo = max(0, i - (TREND_W - 1))         # B3: 최근 N틱 진단 추세(0~3 코드)
         trend = [diag_code(t["pred"][k], round(float(t["conf"][k]), 3)) for k in range(lo, i + 1)]
         trend[-1] = diag_code(pred, conf)       # 현재 셀은 live Booster 진단과 정합
@@ -295,6 +321,13 @@ def snapshot():
         health = health_index(trend, conf, warn)         # B4: 자산 건전도 지표(추세 종합)
         advice = maint_advice(health, trend_dir)         # B4: 정비 트리아지 권고
         sensors = agv_sensors(i, n, pred)
+        if edge_payload:
+            sensors = {**sensors, **(edge_payload.get("sensors") or {})}
+            h = edge_payload.get("health") or {}
+            if isinstance(h.get("index"), int) and 0 <= h["index"] <= 100:
+                health = h["index"]
+            if h.get("advice"):
+                advice = h["advice"]
         phm = phm_forecast(trend, trend_dir, health, conf, warn, sensors)
         item = {"id": a["id"], "x": round(x, 2), "y": round(y, 2), "ang": round(ang, 1),
                 "floor": a["floor"], "status": "warn" if warn else "ok",
@@ -302,6 +335,7 @@ def snapshot():
                 "sensors": sensors, "cause": CAUSE.get(pred, CAUSE["정상"]),
                 "trend": trend, "trend_dir": trend_dir, "health": health, "advice": advice,
                 "phm": phm,
+                "edge_input": {"active": bool(edge_input), "age_sec": edge_input["age_sec"] if edge_input else None},
                 "inference_mode": "live_booster", "model_latency_ms": diag["latency_ms"],
                 "replay_pred": diag["replay_pred"], "replay_conf": diag["replay_conf"]}
         agvs.append(item)
@@ -449,6 +483,25 @@ def api_edge_events(limit: int = 50, topic_prefix: str = None):
     })
 
 
+@app.post("/api/edge-ingest")
+def api_edge_ingest(payload: dict, topic: str = None):
+    """외부 edge/MQTT telemetry payload 수신.
+
+    유효한 payload는 짧은 TTL 동안 3D twin snapshot에 반영된다. 실제 MQTT subscriber는
+    broker에서 받은 JSON payload를 이 endpoint로 넘기면 된다.
+    """
+    event = EDGE.ingest_payload(payload, topic=topic)
+    if not event["validation"]["ok"]:
+        return JSONResponse({"accepted": False, "event": event}, status_code=400)
+    EDGE_INPUTS[payload["asset_id"]] = {"payload": payload, "ingested_at": time.time()}
+    return JSONResponse({
+        "accepted": True,
+        "asset_id": payload["asset_id"],
+        "ttl_sec": EDGE_INPUT_TTL_SEC,
+        "event": event,
+    })
+
+
 @app.get("/api/work-orders")
 def api_work_orders(status: str = None, limit: int = 50):
     """AI 진단에서 자동 생성된 정비 작업지시 목록(CMMS-style queue)."""
@@ -590,6 +643,7 @@ def metrics():
         g("fab_edge_buffered_messages", "edge telemetry 버퍼 메시지 수", edge["buffered_messages"]),
         g("fab_edge_active_topics", "활성 edge telemetry 토픽 수", edge["active_topics"]),
         g("fab_edge_invalid_messages", "스키마 검증 실패 edge telemetry 메시지 수", edge["invalid_messages"]),
+        g("fab_edge_ingested_messages", "외부 edge/MQTT payload 수신 메시지 수", edge["ingested_messages"]),
         g("fab_work_orders_total", "누적 정비 작업지시 수", wo["total"]),
         g("fab_work_orders_open_p1", "미해결 P1 긴급 작업지시 수", wo["open_p1"]),
         g("fab_work_orders_overdue_open", "SLA 초과 미해결 작업지시 수", wo["overdue_open"]),

@@ -27,16 +27,17 @@ It should show four capabilities in one coherent demo:
 | Live inference in twin stream | Done | 100% |
 | MQTT-style edge telemetry contract | Done | 100% |
 | Optional MQTT broker bridge | Done; requires external broker and paho-mqtt for real publish | 85% |
+| MQTT-fed sensor replay input | Done; inbound payload overrides twin snapshot for a short TTL | 85% |
 | Telemetry storage / history / rollup | Done | 100% |
 | External TSDB export contract | Done; Influx line protocol and Timescale SQL export | 85% |
 | Predictive maintenance work orders | Done | 100% |
 | PHM forecast contract | Done; heuristic RUL can be replaced by calibrated model | 85% |
 | Reliability, metrics, drift, model card | Done | 100% |
 | Portable deployment | Docker + compose done; local Docker unavailable here for manual run | 85% |
-| Physical/edge realism | MQTT contract + optional broker publisher + TSDB export done | 78% |
+| Physical/edge realism | MQTT contract + publisher + inbound replay + TSDB export done | 86% |
 | Demo packaging | Visual demo hub and reviewer walkthrough done; demo video still pending | 94% |
 
-Overall: **about 96% complete as a reviewable demo**, and **about 90% complete as
+Overall: **about 97% complete as a reviewable demo**, and **about 92% complete as
 a production-like robotics data platform**.
 
 ## What Is Already Demo-Ready
@@ -55,6 +56,8 @@ a production-like robotics data platform**.
   schema and recent edge telemetry message buffer.
 - `src/mqtt_bridge.py`: optional publisher that reads `/api/snapshot` and sends
   validated edge telemetry envelopes to a real MQTT broker, with dry-run support.
+- `/api/edge-ingest`: validates inbound edge/MQTT payloads and temporarily
+  applies them to `/api/snapshot`, `/twin`, and PHM forecast output.
 - `/api/history`, `/api/stats`, `/api/trend`: telemetry persistence and analysis.
 - `/api/tsdb-contract`, `/api/tsdb-export?fmt=influx`,
   `/api/tsdb-export?fmt=timescale`: external time-series DB export path.
@@ -74,10 +77,11 @@ a production-like robotics data platform**.
 |---|---|---|
 | P1 | Demo video, 2-3 minutes | Makes the project instantly reviewable in portfolio/resume contexts. |
 | P1 | README demo-video link and capture checklist | Turns the repository front page into a one-click visual review path. |
-| P3 | Physical robot or MQTT-fed sensor windows | Replaces the deterministic simulator windows with a real edge source. |
+| P2 | Broker subscriber runner | Bridges a real MQTT subscriber into `/api/edge-ingest` continuously. |
+| P3 | Physical robot sensor source | Replaces test payloads with an actual robot or edge device source. |
 
 ## Recommended Next Three Daily Commits
 
 1. `docs(demo): add video script and capture checklist`
-2. `feat(edge): add mqtt-fed sensor replay input`
+2. `feat(edge): add broker subscriber runner`
 3. `docs(demo): add 2-minute capture script and shot list`

@@ -74,6 +74,21 @@ def test_edge_gateway_buffers_recent_events_and_summary():
     assert gateway.recent(topic_prefix="factory/demo-fab/floor/2/agv/AGV-03")[0]["topic"].endswith("/telemetry")
 
 
+def test_edge_gateway_ingests_inbound_payload():
+    from edge_gateway import EdgeGateway, payload_from_agv
+
+    gateway = EdgeGateway(max_messages=4)
+    payload = payload_from_agv(200.0, _agv(id="AGV-04"))
+    event = gateway.ingest_payload(payload)
+
+    assert event["direction"] == "inbound"
+    assert event["validation"]["ok"] is True
+    summary = gateway.summary()
+    assert summary["ingested_messages"] == 1
+    assert summary["total_messages"] == 1
+    assert gateway.recent()[0]["payload"]["asset_id"] == "AGV-04"
+
+
 def test_edge_contract_document_is_machine_readable():
     from edge_gateway import edge_contract
 
@@ -82,4 +97,5 @@ def test_edge_contract_document_is_machine_readable():
     assert "{floor}" in contract["topic_pattern"] and "{agv_id}" in contract["topic_pattern"]
     assert "sensors" in contract["payload_required"]
     assert contract["qos"] == 1
+    assert contract["ingest_path"] == "/api/edge-ingest"
     assert contract["publisher_bridge"] == "src/mqtt_bridge.py"
