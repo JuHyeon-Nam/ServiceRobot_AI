@@ -8,6 +8,7 @@
 """
 import os
 import sys
+import time
 import pytest
 
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -35,6 +36,9 @@ def test_twin_phm_patrol_cues(client):
     assert "PHM 단계" in r.text
     assert "PHM 위험도" in r.text
     assert "예상 대응시점" in r.text
+    assert "운영 Dispatch" in r.text
+    assert "selImpactBar" in r.text
+    assert "selWorkOrder" in r.text
     assert "Edge 입력" in r.text
     assert "데이터 출처" in r.text
     assert "sourceStat" in r.text
@@ -86,6 +90,9 @@ def test_snapshot_contract(client):
     assert a["status"] in ("ok", "warn")
     assert {"stage", "severity", "risk_score", "rul_estimate_min", "reasons", "action"} <= a["phm"].keys()
     assert 0 <= a["phm"]["risk_score"] <= 100
+    assert {"state", "priority", "sla_min", "impact_pct", "affected_zone", "route_block_risk",
+            "work_order_required", "operator_action"} <= a["dispatch"].keys()
+    assert 0 <= a["dispatch"]["impact_pct"] <= 100
 
 
 def test_data_source_endpoint_exposes_demo_boundaries(client):
@@ -96,6 +103,13 @@ def test_data_source_endpoint_exposes_demo_boundaries(client):
     assert body["replay_motion"]["estimated_cycle_sec"] >= 10
     assert "PHM risk/RUL heuristic" in body["rule_based_parts"]
     assert "9-class fault diagnosis" in body["model_based_parts"]
+
+    import realtime_server
+    realtime_server.EDGE_INPUTS["AGV-EDGE-TEST"] = {"payload": {"asset_id": "AGV-EDGE-TEST"}, "ingested_at": time.time()}
+    try:
+        assert client.get("/api/data-source").json()["edge_active"] >= 1
+    finally:
+        realtime_server.EDGE_INPUTS.pop("AGV-EDGE-TEST", None)
 
 
 def test_phm_forecast_endpoint(client):
@@ -113,6 +127,30 @@ def test_phm_forecast_endpoint(client):
     metrics = client.get("/metrics").text
     assert "fab_phm_max_risk_score" in metrics
     assert "fab_phm_predicted_fault_assets" in metrics
+
+
+def test_dispatch_plan_contract(client):
+    """PdM 결과가 운영 dispatch/SLA/영향도 계약으로 변환되어야 한다."""
+    r = client.get("/api/dispatch-plan")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["schema"] == "fab.dispatch.plan.v1"
+    assert {"total", "dispatch_now", "schedule_inspection", "watch", "max_impact_pct"} <= body["summary"].keys()
+    assert isinstance(body["assets"], list) and body["assets"]
+    first = body["assets"][0]
+    assert {"id", "floor", "label", "health", "status", "dispatch"} <= first.keys()
+    dispatch = first["dispatch"]
+    assert dispatch["state"] in ("dispatch_now", "schedule_inspection", "watch", "normal")
+    assert dispatch["priority"] in ("P1", "P2", "P3", "NORMAL")
+    assert isinstance(dispatch["affected_zone"], str) and dispatch["affected_zone"]
+
+    one = client.get("/api/dispatch-plan", params={"agv": first["id"]})
+    assert one.status_code == 200
+    assert one.json()["assets"][0]["id"] == first["id"]
+
+    m = client.get("/metrics").text
+    for name in ("fab_ops_dispatch_required_assets", "fab_ops_max_impact_pct"):
+        assert f"# TYPE {name} gauge" in m and f"\n{name} " in m
 
 
 def test_live_booster_inference_contract(client):

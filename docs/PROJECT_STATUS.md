@@ -31,13 +31,14 @@ It should show four capabilities in one coherent demo:
 | Telemetry storage / history / rollup | Done | 100% |
 | External TSDB export contract | Done; Influx line protocol and Timescale SQL export | 85% |
 | Predictive maintenance work orders | Done | 100% |
+| Operations dispatch plan | Done; per-AGV impact, SLA, route-block risk, and work-order candidate | 100% |
 | PHM forecast contract | Done; heuristic RUL can be replaced by calibrated model | 85% |
 | Reliability, metrics, drift, model card | Done | 100% |
 | Portable deployment | Docker + compose done; local Docker unavailable here for manual run | 85% |
 | Physical/edge realism | MQTT contract + publisher + inbound replay + TSDB export done | 86% |
 | Demo packaging | Visual demo hub and reviewer walkthrough done; demo video still pending | 94% |
 
-Overall: **about 97% complete as a reviewable demo**, and **about 92% complete as
+Overall: **about 97% complete as a reviewable demo**, and **about 93% complete as
 a production-like robotics data platform**.
 
 ## What Is Already Demo-Ready
@@ -52,6 +53,8 @@ a production-like robotics data platform**.
   rule-based PHM/RUL, Edge TTL input, and physical-robot connection status.
 - `/api/phm`: PHM forecast summary with stage, severity, risk score, RUL estimate,
   reasons, and recommended action.
+- `/api/dispatch-plan`: converts model/PHM output into operations impact,
+  affected zone, route-block risk, priority/SLA, and work-order candidate.
 - `/api/snapshot` inference block: live LightGBM Booster mode, feature count,
   latency, call count, and replay audit fields.
 - `/api/edge-contract`, `/api/edge-events`: MQTT-compatible topic/payload

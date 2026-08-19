@@ -46,6 +46,14 @@
   #sel .close { pointer-events:auto; cursor:pointer; color:var(--muted); font-size:24px; line-height:1; }
   #sel .hbar { height:10px; background:#e5edf6; border:1px solid var(--line); border-radius:5px; overflow:hidden; margin:5px 0 7px; }
   #sel .hbar i { display:block; height:100%; border-radius:5px; transition:width .35s, background .35s; }
+  #sel .ops { margin-top:9px; border:1px solid var(--line); border-radius:8px; background:#f8fafc; padding:9px 10px; }
+  #sel .ops .ot { display:flex; justify-content:space-between; gap:10px; font-size:13px; color:var(--muted); font-weight:800; margin-bottom:6px; }
+  #sel .ops .ot b { color:var(--ink); }
+  #sel .ops .impact { height:12px; background:#e5edf6; border:1px solid var(--line); border-radius:6px; overflow:hidden; margin:6px 0 8px; }
+  #sel .ops .impact i { display:block; height:100%; width:0%; background:#22c55e; border-radius:6px; transition:width .35s, background .35s; }
+  #sel .ops .oline { display:flex; justify-content:space-between; gap:10px; padding:3px 0; font-size:13px; }
+  #sel .ops .oline span:first-child { color:var(--muted); font-weight:800; white-space:nowrap; }
+  #sel .ops .oline span:last-child { text-align:right; font-weight:800; color:var(--ink); }
   #sel .sens { margin-top:9px; border-top:1px solid var(--line); padding-top:8px; }
   #sel .sg { margin-bottom:7px; }
   #sel .sg label { display:flex; justify-content:space-between; font-size:13px; color:var(--muted); margin-bottom:4px; font-weight:800; }
@@ -113,7 +121,7 @@
     #alerts { width:min(46vw, 260px); max-height:30vh; }
     #sel { width:min(80vw, 300px); }
     #hint, #dataStat, #sourceStat, #fleet, #patrol { display:none; }
-    #status { top:60px; right:16px; }
+    #status { top:158px; right:12px; background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:5px 9px; }
     #title h1 { font-size:15px; }
     #sel .close { font-size:24px; padding:0 4px; }   /* 손가락 탭 타깃 확대 */
   }
@@ -123,6 +131,7 @@
     .chip { min-width:44px; padding:5px 7px; }
     .chip b { font-size:17px; }
     #focusBtn { top:102px; right:8px; padding:8px 10px; font-size:12px; }
+    #status { top:146px; right:8px; font-size:12px; }
     #alerts { left:8px; bottom:12px; width:min(52vw, 220px); }
     #sel { right:8px; bottom:12px; width:min(88vw, 300px); }
     #legend { display:none; }
@@ -192,6 +201,14 @@
     <div class="row"><span>PHM 단계</span><span id="selPhm" class="badge">–</span></div>
     <div class="row"><span>PHM 위험도</span><span id="selPhmRisk">–</span></div>
     <div class="row"><span>예상 대응시점</span><span id="selRul">–</span></div>
+    <div class="ops">
+      <div class="ot"><span>운영 Dispatch</span><b id="selDispatchState">–</b></div>
+      <div class="ot"><span>영향도</span><b id="selImpactText">–</b></div>
+      <div class="impact"><i id="selImpactBar"></i></div>
+      <div class="oline"><span>우선순위/SLA</span><span id="selPriority">–</span></div>
+      <div class="oline"><span>영향 구역</span><span id="selZone">–</span></div>
+      <div class="oline"><span>작업지시</span><span id="selWorkOrder">–</span></div>
+    </div>
     <div class="row"><span>Edge 입력</span><span id="selEdge" class="badge">–</span></div>
     <div class="row"><span>데이터 출처</span><span id="selSource">–</span></div>
     <div class="row"><span>건전도(Health)</span><span id="selHealth">–</span></div>
@@ -583,6 +600,24 @@ function showSel(a) {
     phmData.rul_estimate_min === 0 ? '즉시'
     : phmData.rul_estimate_min ? `${phmData.rul_estimate_min}분 이내 점검 권장`
     : '정상 범위';
+  const dispatch = a.dispatch || {};
+  const stateText = {
+    dispatch_now: '즉시 대응',
+    schedule_inspection: '점검 예약',
+    watch: '추세 감시',
+    normal: '정상 순찰'
+  }[dispatch.state] || '정상 순찰';
+  document.getElementById('selDispatchState').textContent = stateText;
+  const impact = dispatch.impact_pct ?? 0;
+  document.getElementById('selImpactText').textContent = `${impact}% · ${dispatch.route_block_risk ? '동선 영향 있음' : '동선 정상'}`;
+  const ib = document.getElementById('selImpactBar');
+  ib.style.width = `${impact}%`;
+  ib.style.background = impact >= 45 ? '#ef4444' : impact >= 25 ? '#fb923c' : impact >= 10 ? '#facc15' : '#22c55e';
+  document.getElementById('selPriority').textContent =
+    dispatch.priority === 'NORMAL' ? '정상' : `${dispatch.priority} · ${dispatch.sla_min}분`;
+  document.getElementById('selZone').textContent = dispatch.affected_zone || '–';
+  document.getElementById('selWorkOrder').textContent =
+    dispatch.work_order_required ? dispatch.work_order_id : dispatch.operator_action || '정상 순찰 유지';
   const edge = document.getElementById('selEdge');
   const edgeActive = a.edge_input && a.edge_input.active;
   edge.textContent = edgeActive ? `수신됨 · ${a.edge_input.age_sec}s` : '내부 replay';

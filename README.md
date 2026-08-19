@@ -66,6 +66,7 @@ LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간
 | AI 운영 | 데이터 QA, 드리프트 감지, 모델 카드, Prometheus metrics |
 | 운영 리포트 | fleet/risk/work-order/drift/reliability/model 요약 및 교대 인수인계 Markdown export (`/api/ops-report`, `/api/shift-handover`) |
 | 정비 운영 | P1/P2/P3 작업지시, SLA, overdue 지표 (`/api/work-orders`) |
+| 운영 Dispatch | AGV별 영향도, 영향 구역, 동선 차단 위험, 대응 SLA 산출 (`/api/dispatch-plan`) |
 | 배포 | Dockerfile, `docker compose up --build`, durable telemetry volume |
 
 ## 시스템 아키텍처
@@ -247,6 +248,8 @@ POST /predict
 | `GET /api/data-source` | Replay, live-model, rule-based PHM, edge-ingest boundaries |
 | `GET /api/phm` | AGV별 PHM forecast, risk score, RUL estimate, action |
 | `GET /api/phm?agv=AGV-03` | Single AGV PHM forecast |
+| `GET /api/dispatch-plan` | AGV별 운영 영향도, dispatch state, priority/SLA, work-order candidate |
+| `GET /api/dispatch-plan?agv=AGV-03` | Single AGV dispatch plan |
 
 ### Telemetry and Reliability
 
@@ -378,6 +381,7 @@ Validation split은 학습에 사용하지 않은 robot instance를 기준으로
 - Telemetry storage, retention, history, rollups, reliability metrics.
 - Edge telemetry schema and API contract.
 - Work-order creation, SLA, overdue, status transitions.
+- Dispatch-plan contract from PdM output to operations impact/SLA.
 - Data quality, drift monitoring, model card, documentation metadata, Docker contracts.
 
 ## Repository Layout
@@ -421,6 +425,7 @@ ServiceRobot_AI/
 - MQTT-compatible edge telemetry contract는 실제 broker 및 외부 time-series DB로 확장하기 위한 경계입니다.
 - `/api/tsdb-export`는 SQLite 이벤트를 InfluxDB line protocol 또는 TimescaleDB SQL로 변환해 외부 TSDB 적재 경로를 검증합니다.
 - Prometheus metrics는 fleet 상태, 운영 risk score, inference latency, edge ingest, drift, reliability, telemetry volume, work-order SLA를 노출합니다.
+- `/api/dispatch-plan`은 모델 진단/PHM 결과를 현장 운영 관점의 영향도, 동선 차단 위험, 우선순위, SLA로 변환합니다.
 
 ## Limitations
 

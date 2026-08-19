@@ -29,7 +29,7 @@ from model_card import build_model_card
 from ops_report import build_ops_report, build_shift_handover, handover_to_markdown, report_to_markdown
 from pdm_runtime import load_runtime, predict_window, synthesize_live_window
 from reviewer_brief import build_reviewer_brief
-from work_order_store import WorkOrderStore
+from work_order_store import WorkOrderStore, priority_for, sla_seconds_for
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(_HERE, "..", "data", "processed")
@@ -55,6 +55,7 @@ CAUSE = {
 # 경고 등급(주의/경고/위험) — 진단 신뢰도(conf) 기준의 3단계 트리아지.
 # 관제 화면에서 다수 경고를 한눈에 우선순위화(색·집계)하기 위한 계약값.
 LEVELS = ("주의", "경고", "위험")
+FLOOR_LABELS = {0: "2F Photo/Etch Bay", 1: "1F Stocker Transfer Bay", 2: "B1 Utility/Lift Bay"}
 
 
 def alert_level(conf: float) -> str:
@@ -184,6 +185,57 @@ def phm_forecast(trend: list, trend_dir: str, health: int, conf: float, warn: bo
         "action": action,
         "method": "health_trend_sensor_heuristic_v1",
         "limitation": "현장 고장 시간으로 보정된 RUL 모델이 아니라 데모용 PHM 위험도 추정",
+    }
+
+
+def dispatch_plan(agv: dict, pred: str, level: str | None, health: int, trend_dir: str, phm: dict, sensors: dict) -> dict:
+    """Translate PdM output into operations language for the 3D asset panel.
+
+    This is not a scheduler. It is a deterministic dispatch contract that makes
+    model output useful to maintenance/operations: priority, SLA, impacted bay,
+    route risk, and candidate work-order id.
+    """
+    current_fault = pred != "정상"
+    stage = phm.get("stage", "normal")
+    needs_work_order = current_fault or health < 55 or stage in ("current_fault", "predicted_fault")
+    priority = priority_for(level if current_fault else phm.get("severity"), health) if needs_work_order else "NORMAL"
+    sla_min = round(sla_seconds_for(priority) / 60) if priority != "NORMAL" else None
+
+    blocked_route = pred in {"E-ENV-C", "E-ENV-O", "E-RBT-E", "E-RBT-N", "E-INF-A", "E-INF-E"}
+    severity_impact = {"위험": 28, "경고": 18, "주의": 9, "정상": 0, None: 0}
+    impact = severity_impact.get(level or phm.get("severity"), 0)
+    impact += max(0, 70 - health) * 0.28
+    if trend_dir == "악화":
+        impact += 7
+    if blocked_route:
+        impact += 9
+    if sensors.get("batt", 100) < 25 or sensors.get("vib", 0) > 5 or sensors.get("temp", 0) > 58:
+        impact += 5
+    impact_pct = int(max(0, min(65, round(impact))))
+
+    if current_fault:
+        state = "dispatch_now"
+        operator_action = "라인 영향 확인 후 작업지시 즉시 확인"
+    elif stage == "predicted_fault" or health < 55:
+        state = "schedule_inspection"
+        operator_action = "다음 정지 가능 시간에 예방점검 예약"
+    elif stage == "watch" or trend_dir == "악화":
+        state = "watch"
+        operator_action = "센서 추세 감시 및 동일 패턴 반복 확인"
+    else:
+        state = "normal"
+        operator_action = "정상 순찰 유지"
+
+    return {
+        "state": state,
+        "priority": priority,
+        "sla_min": sla_min,
+        "impact_pct": impact_pct,
+        "affected_zone": FLOOR_LABELS.get(agv.get("floor"), f"Floor {agv.get('floor')}"),
+        "route_block_risk": blocked_route,
+        "work_order_required": needs_work_order,
+        "work_order_id": f"WO-{agv['id']}-{pred}" if needs_work_order else None,
+        "operator_action": operator_action,
     }
 
 
@@ -345,12 +397,13 @@ def snapshot():
             if h.get("advice"):
                 advice = h["advice"]
         phm = phm_forecast(trend, trend_dir, health, conf, warn, sensors)
+        dispatch = dispatch_plan(a, pred, level, health, trend_dir, phm, sensors)
         item = {"id": a["id"], "x": round(x, 2), "y": round(y, 2), "ang": round(ang, 1),
                 "floor": a["floor"], "status": "warn" if warn else "ok",
                 "pred": pred, "label": KOR.get(pred, pred), "conf": conf, "level": level,
                 "sensors": sensors, "cause": CAUSE.get(pred, CAUSE["정상"]),
                 "trend": trend, "trend_dir": trend_dir, "health": health, "advice": advice,
-                "phm": phm,
+                "phm": phm, "dispatch": dispatch,
                 "edge_input": {"active": bool(edge_input), "age_sec": edge_input["age_sec"] if edge_input else None},
                 "inference_mode": "live_booster", "model_latency_ms": diag["latency_ms"],
                 "replay_pred": diag["replay_pred"], "replay_conf": diag["replay_conf"]}
@@ -408,7 +461,8 @@ def api_snapshot():
 @app.get("/api/data-source")
 def api_data_source():
     """데모 데이터의 출처와 AI/규칙 기반 경계를 명시적으로 공개한다."""
-    active_edges = sum(_edge_override(agv_id) is not None for agv_id in list(EDGE_INPUTS))
+    now = time.time()
+    active_edges = sum(active_edge_input(agv_id, now) is not None for agv_id in list(EDGE_INPUTS))
     return JSONResponse(dict(
         DATA_SOURCE,
         edge_active=active_edges,
@@ -438,6 +492,32 @@ def api_phm(agv: str = None):
         "max_risk_score": max((r["phm"]["risk_score"] for r in rows), default=0),
     }
     return JSONResponse({"schema": "fab.phm.forecast.v1", "summary": summary, "assets": rows})
+
+
+@app.get("/api/dispatch-plan")
+def api_dispatch_plan(agv: str = None):
+    """PdM 결과를 운영/정비 dispatch 단위로 변환한 계획."""
+    snap = snapshot()
+    rows = [
+        {"id": a["id"], "floor": a["floor"], "label": a["label"], "health": a["health"],
+         "status": a["status"], "dispatch": a["dispatch"]}
+        for a in snap["agvs"]
+        if agv is None or a["id"] == agv
+    ]
+    if agv is not None and not rows:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    urgent = [r for r in rows if r["dispatch"]["state"] in ("dispatch_now", "schedule_inspection")]
+    return JSONResponse({
+        "schema": "fab.dispatch.plan.v1",
+        "summary": {
+            "total": len(rows),
+            "dispatch_now": sum(r["dispatch"]["state"] == "dispatch_now" for r in rows),
+            "schedule_inspection": sum(r["dispatch"]["state"] == "schedule_inspection" for r in rows),
+            "watch": sum(r["dispatch"]["state"] == "watch" for r in rows),
+            "max_impact_pct": max((r["dispatch"]["impact_pct"] for r in rows), default=0),
+        },
+        "assets": sorted(urgent or rows, key=lambda r: r["dispatch"]["impact_pct"], reverse=True),
+    })
 
 
 _HIST_COLS = ["ts", "pred", "conf", "level", "health", "vib", "batt", "temp"]
@@ -653,6 +733,7 @@ def metrics():
     edge = EDGE.summary()
     risk = fleet_risk(snap["agvs"], wo)
     phm_assets = [a["phm"] for a in snap["agvs"]]
+    dispatch_assets = [a["dispatch"] for a in snap["agvs"]]
     g = lambda name, help_, val: (f"# HELP {name} {help_}\n# TYPE {name} gauge\n{name} {val}")
     lines = [
         g("fab_agv_total", "가동 AGV 수", s["total"]),
@@ -683,6 +764,10 @@ def metrics():
           max((p["risk_score"] for p in phm_assets), default=0)),
         g("fab_phm_predicted_fault_assets", "현재 이상 전 PHM 예측 이상 asset 수",
           sum(p["stage"] in ("predicted_fault", "watch") for p in phm_assets)),
+        g("fab_ops_dispatch_required_assets", "운영/정비 dispatch 필요 asset 수",
+          sum(d["state"] in ("dispatch_now", "schedule_inspection") for d in dispatch_assets)),
+        g("fab_ops_max_impact_pct", "AGV 운영 영향도 최대값(0~100)",
+          max((d["impact_pct"] for d in dispatch_assets), default=0)),
         g("fab_fleet_availability", "플릿 가용도(0~1)", rel["availability"]),
         g("fab_fleet_mttr_seconds", "평균 복구 시간(초)", rel["mttr"]),
         g("fab_fleet_mtbf_seconds", "평균 고장 간격(초)", rel["mtbf"] if rel["mtbf"] is not None else 0),
