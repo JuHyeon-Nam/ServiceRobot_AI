@@ -1,7 +1,7 @@
 # ServiceRobot_AI
 
 서비스 로봇 및 FAB-style AGV 플릿을 대상으로 한 **실시간 예지보전(Predictive Maintenance) 시스템**입니다.
-LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간 스트리밍, Three.js 3D 디지털 트윈, MQTT-compatible 엣지 텔레메트리 계약, 선택형 MQTT broker bridge, SQLite 시계열 저장소, 외부 TSDB export, 신뢰성 지표, 드리프트 모니터링, 정비 작업지시 큐를 하나의 실행 가능한 시스템으로 구성했습니다.
+LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간 스트리밍, Three.js 3D 디지털 트윈, MQTT-compatible 엣지 텔레메트리 계약, 선택형 MQTT broker publisher/subscriber, SQLite 시계열 저장소, 외부 TSDB export, 신뢰성 지표, 드리프트 모니터링, 정비 작업지시 큐를 하나의 실행 가능한 시스템으로 구성했습니다.
 
 [![CI](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml/badge.svg)](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml)
 
@@ -60,7 +60,7 @@ LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간
 | 실시간 관제 | FastAPI + WebSocket + Three.js 3D twin (`/twin`) |
 | 시연 허브 | 주요 화면·운영 API·모델 산출물을 연결하는 데모 진입점 (`/demo`) |
 | PHM 예측 | 진단 추세, 건전도, 센서 임계 신호 기반 위험도/RUL 추정 (`/api/phm`) |
-| 엣지 텔레메트리 | MQTT-compatible topic/payload contract, optional broker publisher, inbound edge ingest (`/api/edge-contract`, `/api/edge-events`, `/api/edge-ingest`, `mqtt_bridge.py`) |
+| 엣지 텔레메트리 | MQTT-compatible topic/payload contract, broker publisher/subscriber, inbound edge ingest (`/api/edge-contract`, `/api/edge-events`, `/api/edge-ingest`, `mqtt_bridge.py`, `mqtt_subscriber.py`) |
 | 시계열 저장 | SQLite 이벤트 저장, 이력 조회, rollup, CSV/Influx/Timescale export, retention |
 | 신뢰성/리스크 지표 | MTBF, MTTR, availability, floor별 운영 risk 분석 (`/api/reliability`, `/api/fleet-risk`) |
 | AI 운영 | 데이터 QA, 드리프트 감지, 모델 카드, Prometheus metrics |
@@ -83,8 +83,9 @@ flowchart LR
     twin --> ws["WebSocket /ws"]
     twin --> ui["Three.js twin /twin"]
     twin --> edge["MQTT-style edge buffer<br/>/api/edge-events"]
-    edge --> broker["Optional MQTT broker bridge<br/>mqtt_bridge.py"]
-    broker --> ingest["Inbound edge ingest<br/>/api/edge-ingest"]
+    edge --> broker["Optional MQTT publisher<br/>mqtt_bridge.py"]
+    broker --> sub["Optional MQTT subscriber<br/>mqtt_subscriber.py"]
+    sub --> ingest["Inbound edge ingest<br/>/api/edge-ingest"]
     ingest --> twin
     twin --> store["SQLite telemetry store"]
     store --> ops["stats / history / trend / reliability / fleet risk"]
@@ -152,7 +153,7 @@ Feature engineering:
 | PHM 위험도/RUL | 건전도·추세·센서 신호 기반 heuristic | 현장 고장 시각으로 보정한 RUL 회귀모델로 교체 가능한 인터페이스 |
 | 외부 입력 | `POST /api/edge-ingest` -> WebSocket `/ws` -> 3D twin | MQTT-compatible payload를 즉시 반영하며 기본 10초 TTL 적용 |
 
-따라서 현재 화면은 **AI 추론이 포함된 replay 기반 디지털 트윈**입니다. 실제 MQTT broker에서 지속 수신하는 subscriber와 물리 로봇 센서 연결은 다음 확장 단계이며, 지금도 외부 edge payload를 주입하면 해당 AGV의 3D 색상, 클릭 패널, PHM 위험도가 즉시 바뀝니다. 데이터 출처와 적용 범위는 `/api/data-source`와 `/api/model-card`에서도 확인할 수 있습니다.
+따라서 현재 화면은 **AI 추론이 포함된 replay 기반 디지털 트윈**입니다. 실제 MQTT broker를 사용할 경우 `mqtt_bridge.py`가 snapshot을 publish하고, `mqtt_subscriber.py`가 broker payload를 `/api/edge-ingest`로 forward해 해당 AGV의 3D 색상, 클릭 패널, PHM 위험도를 즉시 바꿉니다. 물리 로봇 센서 연결은 이 MQTT subscriber의 upstream만 교체하면 됩니다. 데이터 출처와 적용 범위는 `/api/data-source`와 `/api/model-card`에서도 확인할 수 있습니다.
 
 ## Runtime Components
 
@@ -167,6 +168,7 @@ Feature engineering:
 | FAB layout | `src/fab_layout.py` | 층, 장비, 트랙, AGV 경로 정의 |
 | Edge gateway | `src/edge_gateway.py` | AGV 상태를 MQTT-compatible telemetry envelope로 변환 |
 | MQTT bridge | `src/mqtt_bridge.py` | `/api/snapshot`을 읽어 실제 MQTT broker로 telemetry publish |
+| MQTT subscriber | `src/mqtt_subscriber.py` | broker telemetry를 검증해 `/api/edge-ingest`로 forward |
 | Telemetry store | `src/telemetry_store.py` | warning/low-health 이벤트 저장 및 집계 |
 | TSDB export | `src/tsdb_export.py` | SQLite 이벤트를 InfluxDB line protocol / TimescaleDB SQL로 변환 |
 | Work-order store | `src/work_order_store.py` | 예측정비 작업지시 생성, 상태, SLA 관리 |
@@ -278,7 +280,7 @@ POST /predict
 | `GET /api/edge-events?limit=50` | Recent edge telemetry messages |
 | `POST /api/edge-ingest` | Validate inbound edge/MQTT payload and apply it to live twin snapshot for a short TTL |
 
-Optional broker publisher:
+Optional broker publisher/subscriber:
 
 ```bash
 # Terminal 1
@@ -288,11 +290,17 @@ uvicorn realtime_server:app --reload
 # Terminal 2, repository root: broker 없이 topic/payload publish 계획만 검증
 python src/mqtt_bridge.py --once --dry-run
 
-# Terminal 2, repository root: 실제 broker publish
+# Terminal 3, repository root: subscriber ingest 설정 검증
+python src/mqtt_subscriber.py --dry-run
+
+# 실제 broker publish
 python src/mqtt_bridge.py --host 127.0.0.1 --port 1883
+
+# 실제 broker subscribe -> /api/edge-ingest forward
+python src/mqtt_subscriber.py --host 127.0.0.1 --port 1883 --ingest-url http://127.0.0.1:8000/api/edge-ingest
 ```
 
-`paho-mqtt`가 설치되어 있어야 실제 broker publish가 동작합니다. `--dry-run`은 broker와 추가 의존성 없이 snapshot을 MQTT publish 이벤트로 변환해 검증합니다.
+`paho-mqtt`가 설치되어 있어야 실제 broker publish/subscribe가 동작합니다. `--dry-run`은 broker와 추가 의존성 없이 publish 계획 또는 subscriber ingest 설정을 검증합니다.
 
 Inbound replay injection:
 

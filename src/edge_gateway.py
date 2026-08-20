@@ -36,7 +36,8 @@ def edge_contract() -> dict:
         "consumer_path": "/api/edge-events",
         "ingest_path": "/api/edge-ingest",
         "publisher_bridge": "src/mqtt_bridge.py",
-        "scale_up_path": "Run mqtt_bridge.py against a broker, then POST subscribed broker payloads to /api/edge-ingest.",
+        "subscriber_bridge": "src/mqtt_subscriber.py",
+        "scale_up_path": "Run mqtt_bridge.py to publish snapshots, and mqtt_subscriber.py to forward broker telemetry into /api/edge-ingest.",
     }
 
 

@@ -99,3 +99,4 @@ def test_edge_contract_document_is_machine_readable():
     assert contract["qos"] == 1
     assert contract["ingest_path"] == "/api/edge-ingest"
     assert contract["publisher_bridge"] == "src/mqtt_bridge.py"
+    assert contract["subscriber_bridge"] == "src/mqtt_subscriber.py"

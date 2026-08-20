@@ -99,11 +99,11 @@ def build_reviewer_brief() -> dict:
             "0:55-1:30 Click a warning AGV and explain health index, sensors, cause, and event history.",
             "1:30-2:05 Open /api/edge-events, /api/work-orders, /api/reliability, and /api/trend to show operational analytics.",
             "2:05-2:35 Open /api/drift and /api/data-quality to show AI/data monitoring.",
-            "2:35-3:00 Open /api/model-card and close with artifact lineage and real broker/TSDB scale-up path.",
+            "2:35-3:00 Open /api/model-card and close with artifact lineage, MQTT broker subscriber, and TSDB scale-up path.",
         ],
         "current_status": {
-            "portfolio_demo": "92%",
-            "production_like_robotics_data_platform": "82%",
-            "next_best_work": "Record a 2-3 minute demo video and replace the in-process edge buffer with a real MQTT broker bridge.",
+            "portfolio_demo": "98%",
+            "production_like_robotics_data_platform": "94%",
+            "next_best_work": "Record a 2-3 minute demo video and add a local Mosquitto smoke profile.",
         },
     }

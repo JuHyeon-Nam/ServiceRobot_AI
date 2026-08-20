@@ -7,4 +7,6 @@ lightgbm==4.6.0
 fastapi==0.136.1
 uvicorn==0.46.0
 pydantic==2.13.4
+requests==2.34.0
+paho-mqtt==2.1.0
 websockets==16.0

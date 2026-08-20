@@ -45,12 +45,12 @@
 | 0:55-1:30 | "When I select an AGV, I can inspect sensors, health index, diagnosis reason, and history." |
 | 1:30-2:05 | "The backend emits MQTT-style edge messages, turns warnings into maintenance work orders, and exposes trend/reliability analytics." |
 | 2:05-2:35 | "For AI operations, I monitor data quality, live drift, and model artifact lineage." |
-| 2:35-3:00 | "The whole demo runs with Docker Compose, and the next scale-up path is MQTT plus a time-series DB." |
+| 2:35-3:00 | "The whole demo runs with Docker Compose, and the scale-up path is MQTT broker ingest plus a time-series DB." |
 
 ## Current Completion
 
-Portfolio demo: **92% complete**.
+Portfolio demo: **98% complete**.
 
 The core experience is demo-ready. The remaining highest-impact work is recording
-a polished 2-3 minute demo video and replacing the in-process edge buffer with
-a real MQTT broker bridge.
+a polished 2-3 minute demo video and adding a local Mosquitto smoke profile for
+the publisher/subscriber path.
