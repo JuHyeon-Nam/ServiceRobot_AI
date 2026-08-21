@@ -103,7 +103,7 @@ def build_reviewer_brief() -> dict:
         ],
         "current_status": {
             "portfolio_demo": "98%",
-            "production_like_robotics_data_platform": "94%",
-            "next_best_work": "Record a 2-3 minute demo video and add a local Mosquitto smoke profile.",
+            "production_like_robotics_data_platform": "95%",
+            "next_best_work": "Record a 2-3 minute demo video and add a physical-sensor adapter example.",
         },
     }

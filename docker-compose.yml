@@ -24,5 +24,54 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  mqtt-broker:
+    image: eclipse-mosquitto:2
+    container_name: servicerobot-ai-mqtt
+    profiles: ["mqtt", "mqtt-smoke"]
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./deploy/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
+  mqtt-subscriber:
+    image: servicerobot-ai:latest
+    container_name: servicerobot-ai-mqtt-subscriber
+    profiles: ["mqtt", "mqtt-smoke"]
+    depends_on:
+      twin-api:
+        condition: service_healthy
+      mqtt-broker:
+        condition: service_started
+    working_dir: /app/src
+    command:
+      - python
+      - mqtt_subscriber.py
+      - --host
+      - mqtt-broker
+      - --ingest-url
+      - http://twin-api:8000/api/edge-ingest
+    restart: unless-stopped
+
+  mqtt-smoke-publisher:
+    image: servicerobot-ai:latest
+    profiles: ["mqtt-smoke"]
+    depends_on:
+      twin-api:
+        condition: service_healthy
+      mqtt-broker:
+        condition: service_started
+      mqtt-subscriber:
+        condition: service_started
+    working_dir: /app/src
+    command:
+      - python
+      - mqtt_bridge.py
+      - --host
+      - mqtt-broker
+      - --snapshot-url
+      - http://twin-api:8000/api/snapshot
+      - --once
+
 volumes:
   telemetry-data:

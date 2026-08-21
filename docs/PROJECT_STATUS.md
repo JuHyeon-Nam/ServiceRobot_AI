@@ -26,19 +26,19 @@ It should show four capabilities in one coherent demo:
 | 3D digital twin demo | Done; slower replay, light high-legibility UI, normal/warning AGV click focus | 100% |
 | Live inference in twin stream | Done | 100% |
 | MQTT-style edge telemetry contract | Done | 100% |
-| Optional MQTT broker bridge | Done; publisher/subscriber runners require external broker and paho-mqtt for real broker mode | 95% |
-| MQTT-fed sensor replay input | Done; inbound broker/API payload overrides twin snapshot for a short TTL | 90% |
+| Optional MQTT broker bridge | Done; publisher/subscriber runners plus Mosquitto compose smoke profile | 100% |
+| MQTT-fed sensor replay input | Done; inbound broker/API payload overrides twin snapshot for a short TTL | 95% |
 | Telemetry storage / history / rollup | Done | 100% |
 | External TSDB export contract | Done; Influx line protocol and Timescale SQL export | 85% |
 | Predictive maintenance work orders | Done | 100% |
 | Operations dispatch plan | Done; per-AGV impact, SLA, route-block risk, and work-order candidate | 100% |
 | PHM forecast contract | Done; heuristic RUL can be replaced by calibrated model | 85% |
 | Reliability, metrics, drift, model card | Done | 100% |
-| Portable deployment | Docker + compose done; local Docker unavailable here for manual run | 85% |
-| Physical/edge realism | MQTT contract + publisher + subscriber + inbound replay + TSDB export done | 90% |
+| Portable deployment | Docker + compose + MQTT profile done; local Docker CLI unavailable here for manual run | 90% |
+| Physical/edge realism | MQTT contract + publisher + subscriber + Mosquitto profile + TSDB export done | 92% |
 | Demo packaging | Visual demo hub and reviewer walkthrough done; demo video still pending | 94% |
 
-Overall: **about 98% complete as a reviewable demo**, and **about 94% complete as
+Overall: **about 98% complete as a reviewable demo**, and **about 95% complete as
 a production-like robotics data platform**.
 
 ## What Is Already Demo-Ready
@@ -63,6 +63,8 @@ a production-like robotics data platform**.
   validated edge telemetry envelopes to a real MQTT broker, with dry-run support.
 - `src/mqtt_subscriber.py`: optional subscriber that receives broker telemetry,
   validates the payload contract, and forwards it into `/api/edge-ingest`.
+- `docker compose --profile mqtt up --build`: starts the API, Mosquitto broker,
+  and subscriber; `--profile mqtt-smoke` runs a one-shot publisher smoke.
 - `/api/edge-ingest`: validates inbound edge/MQTT payloads and temporarily
   applies them to `/api/snapshot`, `/twin`, and PHM forecast output.
 - `/api/history`, `/api/stats`, `/api/trend`: telemetry persistence and analysis.
@@ -84,11 +86,10 @@ a production-like robotics data platform**.
 |---|---|---|
 | P1 | Demo video, 2-3 minutes | Makes the project instantly reviewable in portfolio/resume contexts. |
 | P1 | README demo-video link and capture checklist | Turns the repository front page into a one-click visual review path. |
-| P2 | Broker integration smoke test profile | Runs publisher/subscriber against a local Mosquitto broker in one documented flow. |
 | P3 | Physical robot sensor source | Replaces controlled replay windows with an actual robot or edge-device source. |
 
 ## Recommended Next Three Daily Commits
 
 1. `docs(demo): add video script and capture checklist`
-2. `test(edge): add mosquitto smoke profile`
-3. `docs(demo): add 2-minute capture script and shot list`
+2. `docs(demo): add 2-minute capture script and shot list`
+3. `feat(edge): add physical sensor adapter stub`

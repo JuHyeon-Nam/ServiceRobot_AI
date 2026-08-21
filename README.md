@@ -197,6 +197,20 @@ Docker Compose는 runtime telemetry를 `telemetry-data` volume에 저장합니�
 TELEMETRY_DB: /app/data/runtime/telemetry.db
 ```
 
+MQTT broker profile:
+
+```bash
+docker compose --profile mqtt up --build
+```
+
+위 명령은 `twin-api`, Mosquitto broker, MQTT subscriber를 함께 실행합니다.
+별도 터미널에서 one-shot publish smoke를 실행하면 `/api/snapshot` payload가 broker로 publish되고 subscriber가 `/api/edge-ingest`로 forward합니다.
+
+```bash
+docker compose --profile mqtt-smoke run --rm mqtt-smoke-publisher
+curl http://127.0.0.1:8000/api/data-source
+```
+
 ### Local Development
 
 ```bash
@@ -301,6 +315,7 @@ python src/mqtt_subscriber.py --host 127.0.0.1 --port 1883 --ingest-url http://1
 ```
 
 `paho-mqtt`가 설치되어 있어야 실제 broker publish/subscribe가 동작합니다. `--dry-run`은 broker와 추가 의존성 없이 publish 계획 또는 subscriber ingest 설정을 검증합니다.
+Docker Compose를 사용할 경우 `docker compose --profile mqtt up --build`로 Mosquitto broker와 subscriber를 같이 띄우고, `docker compose --profile mqtt-smoke run --rm mqtt-smoke-publisher`로 one-shot smoke publish를 실행할 수 있습니다.
 
 Inbound replay injection:
 

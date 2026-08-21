@@ -52,5 +52,5 @@
 Portfolio demo: **98% complete**.
 
 The core experience is demo-ready. The remaining highest-impact work is recording
-a polished 2-3 minute demo video and adding a local Mosquitto smoke profile for
-the publisher/subscriber path.
+a polished 2-3 minute demo video and adding a small physical-sensor adapter
+example on top of the MQTT ingest path.
