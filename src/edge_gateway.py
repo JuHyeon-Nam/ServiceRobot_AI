@@ -37,6 +37,7 @@ def edge_contract() -> dict:
         "ingest_path": "/api/edge-ingest",
         "publisher_bridge": "src/mqtt_bridge.py",
         "subscriber_bridge": "src/mqtt_subscriber.py",
+        "physical_sensor_adapter": "src/physical_sensor_adapter.py",
         "scale_up_path": "Run mqtt_bridge.py to publish snapshots, and mqtt_subscriber.py to forward broker telemetry into /api/edge-ingest.",
     }
 

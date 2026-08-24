@@ -60,7 +60,7 @@ def build_reviewer_brief() -> dict:
             },
             {
                 "claim": "Data engineering is represented",
-                "evidence": "MQTT-style edge messages, SQLite event store, rollups, history query, CSV export, retention policy.",
+                "evidence": "MQTT-style edge messages, physical sensor adapter, SQLite event store, rollups, history query, CSV export, retention policy.",
             },
             {
                 "claim": "MLOps and governance are represented",
@@ -97,13 +97,13 @@ def build_reviewer_brief() -> dict:
             "0:00-0:20 Run docker compose or uvicorn and open /twin.",
             "0:20-0:55 Show moving AGVs, floors, OHT rails, lift, and severity colors.",
             "0:55-1:30 Click a warning AGV and explain health index, sensors, cause, and event history.",
-            "1:30-2:05 Open /api/edge-events, /api/work-orders, /api/reliability, and /api/trend to show operational analytics.",
+            "1:30-2:05 Open /api/edge-events, physical_sensor_adapter.py, /api/work-orders, /api/reliability, and /api/trend to show operational analytics.",
             "2:05-2:35 Open /api/drift and /api/data-quality to show AI/data monitoring.",
             "2:35-3:00 Open /api/model-card and close with artifact lineage, MQTT broker subscriber, and TSDB scale-up path.",
         ],
         "current_status": {
-            "portfolio_demo": "98%",
-            "production_like_robotics_data_platform": "95%",
-            "next_best_work": "Record a 2-3 minute demo video and add a physical-sensor adapter example.",
+            "portfolio_demo": "99%",
+            "production_like_robotics_data_platform": "96%",
+            "next_best_work": "Record a 2-3 minute demo video and link it at the top of the README.",
         },
     }

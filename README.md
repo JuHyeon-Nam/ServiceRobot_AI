@@ -27,6 +27,7 @@ LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간
 ### 시연 허브
 
 `/demo`는 3D 디지털 트윈, 2D 관제 화면, 운영 리포트, 모델 카드, 데이터/AI 운영 지표를 한 화면에서 연결하는 실행형 시연 진입점입니다.
+2-3분 영상 캡처 순서는 [`docs/DEMO_CAPTURE_CHECKLIST.md`](docs/DEMO_CAPTURE_CHECKLIST.md)에 정리되어 있습니다.
 
 ### 3D 디지털 트윈
 
@@ -169,6 +170,7 @@ Feature engineering:
 | Edge gateway | `src/edge_gateway.py` | AGV 상태를 MQTT-compatible telemetry envelope로 변환 |
 | MQTT bridge | `src/mqtt_bridge.py` | `/api/snapshot`을 읽어 실제 MQTT broker로 telemetry publish |
 | MQTT subscriber | `src/mqtt_subscriber.py` | broker telemetry를 검증해 `/api/edge-ingest`로 forward |
+| Physical sensor adapter | `src/physical_sensor_adapter.py` | JSON/CSV 센서 라인을 edge payload로 정규화해 ingest |
 | Telemetry store | `src/telemetry_store.py` | warning/low-health 이벤트 저장 및 집계 |
 | TSDB export | `src/tsdb_export.py` | SQLite 이벤트를 InfluxDB line protocol / TimescaleDB SQL로 변환 |
 | Work-order store | `src/work_order_store.py` | 예측정비 작업지시 생성, 상태, SLA 관리 |
@@ -317,6 +319,18 @@ python src/mqtt_subscriber.py --host 127.0.0.1 --port 1883 --ingest-url http://1
 `paho-mqtt`가 설치되어 있어야 실제 broker publish/subscribe가 동작합니다. `--dry-run`은 broker와 추가 의존성 없이 publish 계획 또는 subscriber ingest 설정을 검증합니다.
 Docker Compose를 사용할 경우 `docker compose --profile mqtt up --build`로 Mosquitto broker와 subscriber를 같이 띄우고, `docker compose --profile mqtt-smoke run --rm mqtt-smoke-publisher`로 one-shot smoke publish를 실행할 수 있습니다.
 
+Physical sensor adapter example:
+
+```bash
+printf '{"asset_id":"AGV-01","floor":0,"vib":6.2,"batt":42,"temp":61}\n' \
+  | python src/physical_sensor_adapter.py --dry-run
+
+printf 'AGV-02,1,2.1,88,38,120,80,270\n' \
+  | python src/physical_sensor_adapter.py --ingest-url http://127.0.0.1:8000/api/edge-ingest
+```
+
+JSON line 또는 CSV line(`asset_id,floor,vib,batt,temp,x,y,heading_deg`)을 받아 `fab.edge.telemetry.v1` payload로 변환합니다. 실제 센서/PLC/마이크로컨트롤러는 이 adapter의 입력 라인만 연결하면 기존 `/api/edge-ingest`, MQTT subscriber, 3D twin 흐름을 그대로 사용할 수 있습니다.
+
 Inbound replay injection:
 
 ```bash
@@ -403,6 +417,7 @@ Validation split은 학습에 사용하지 않은 robot instance를 기준으로
 - Live Booster inference fields.
 - Telemetry storage, retention, history, rollups, reliability metrics.
 - Edge telemetry schema and API contract.
+- Physical sensor adapter line parsing and ingest payload conversion.
 - Work-order creation, SLA, overdue, status transitions.
 - Dispatch-plan contract from PdM output to operations impact/SLA.
 - Data quality, drift monitoring, model card, documentation metadata, Docker contracts.
@@ -421,6 +436,7 @@ ServiceRobot_AI/
 │   ├── realtime_server.py
 │   ├── pdm_runtime.py
 │   ├── edge_gateway.py
+│   ├── physical_sensor_adapter.py
 │   ├── telemetry_store.py
 │   ├── work_order_store.py
 │   ├── dataset_quality.py

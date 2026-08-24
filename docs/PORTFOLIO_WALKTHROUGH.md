@@ -10,6 +10,7 @@
 
 3. Open the operations APIs.
    Use `/api/edge-events`, `/api/work-orders`, `/api/reliability`, `/api/trend`, and `/api/history` to show edge telemetry topics, maintenance actions, MTBF/MTTR, fleet trends, and stored telemetry.
+   Then mention `physical_sensor_adapter.py` as the hardware-facing input path for JSON/CSV sensor lines.
 
 4. Open the AI governance APIs.
    Use `/api/drift`, `/api/data-quality`, and `/api/model-card` to show drift monitoring, data QA, artifact hash, and feature contract.
@@ -43,14 +44,13 @@
 | 0:00-0:20 | "This is a real-time PdM control center for service robots / FAB AGVs." |
 | 0:20-0:55 | "The 3D twin streams AGV positions and AI status in real time." |
 | 0:55-1:30 | "When I select an AGV, I can inspect sensors, health index, diagnosis reason, and history." |
-| 1:30-2:05 | "The backend emits MQTT-style edge messages, turns warnings into maintenance work orders, and exposes trend/reliability analytics." |
+| 1:30-2:05 | "The backend accepts MQTT or physical sensor adapter input, turns warnings into maintenance work orders, and exposes trend/reliability analytics." |
 | 2:05-2:35 | "For AI operations, I monitor data quality, live drift, and model artifact lineage." |
 | 2:35-3:00 | "The whole demo runs with Docker Compose, and the scale-up path is MQTT broker ingest plus a time-series DB." |
 
 ## Current Completion
 
-Portfolio demo: **98% complete**.
+Portfolio demo: **99% complete**.
 
 The core experience is demo-ready. The remaining highest-impact work is recording
-a polished 2-3 minute demo video and adding a small physical-sensor adapter
-example on top of the MQTT ingest path.
+a polished 2-3 minute demo video and linking it at the top of the README.
