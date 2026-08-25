@@ -1,7 +1,7 @@
 # ServiceRobot_AI
 
 서비스 로봇 및 FAB-style AGV 플릿을 대상으로 한 **실시간 예지보전(Predictive Maintenance) 시스템**입니다.
-LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간 스트리밍, Three.js 3D 디지털 트윈, MQTT-compatible 엣지 텔레메트리 계약, 선택형 MQTT broker publisher/subscriber, SQLite 시계열 저장소, 외부 TSDB export, 신뢰성 지표, 드리프트 모니터링, 정비 작업지시 큐를 하나의 실행 가능한 시스템으로 구성했습니다.
+LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간 스트리밍, Three.js 3D 디지털 트윈, MQTT-compatible 엣지 텔레메트리 계약, RUL calibration contract, 선택형 MQTT broker publisher/subscriber, SQLite 시계열 저장소, 외부 TSDB export, 신뢰성 지표, 드리프트 모니터링, 정비 작업지시 큐를 하나의 실행 가능한 시스템으로 구성했습니다.
 
 [![CI](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml/badge.svg)](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml)
 
@@ -61,6 +61,7 @@ LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간
 | 실시간 관제 | FastAPI + WebSocket + Three.js 3D twin (`/twin`) |
 | 시연 허브 | 주요 화면·운영 API·모델 산출물을 연결하는 데모 진입점 (`/demo`) |
 | PHM 예측 | 진단 추세, 건전도, 센서 임계 신호 기반 위험도/RUL 추정 (`/api/phm`) |
+| RUL 전환 계약 | 실제 failure-time label 확보 시 학습형 RUL/survival 모델로 교체하기 위한 feature/label/readiness 계약 (`/api/rul-contract`) |
 | 엣지 텔레메트리 | MQTT-compatible topic/payload contract, broker publisher/subscriber, inbound edge ingest (`/api/edge-contract`, `/api/edge-events`, `/api/edge-ingest`, `mqtt_bridge.py`, `mqtt_subscriber.py`) |
 | 시계열 저장 | SQLite 이벤트 저장, 이력 조회, rollup, CSV/Influx/Timescale export, retention |
 | 신뢰성/리스크 지표 | MTBF, MTTR, availability, floor별 운영 risk 분석 (`/api/reliability`, `/api/fleet-risk`) |
@@ -151,7 +152,7 @@ Feature engineering:
 | 3D 이동 | 결정론적 trajectory replay, 약 63초에 한 바퀴 | 화면 시연이 매번 재현되고 실제 설비처럼 천천히 이동 |
 | 센서 window | replay 상태를 바탕으로 만든 30-step runtime window | 현재는 물리 로봇 센서 스트림이 아닌 제어 가능한 데모 입력 |
 | 고장 진단 | 매 snapshot마다 LightGBM Booster 실시간 추론 | 9-class 고장 코드와 신뢰도는 규칙이 아닌 모델 출력 |
-| PHM 위험도/RUL | 건전도·추세·센서 신호 기반 heuristic | 현장 고장 시각으로 보정한 RUL 회귀모델로 교체 가능한 인터페이스 |
+| PHM 위험도/RUL | 건전도·추세·센서 신호 기반 heuristic + RUL model slot | `/api/rul-contract`가 feature/label/readiness를 공개하며, 현장 고장 시각으로 보정한 RUL 회귀/Survival 모델로 교체 가능 |
 | 외부 입력 | `POST /api/edge-ingest` -> WebSocket `/ws` -> 3D twin | MQTT-compatible payload를 즉시 반영하며 기본 10초 TTL 적용 |
 
 따라서 현재 화면은 **AI 추론이 포함된 replay 기반 디지털 트윈**입니다. 실제 MQTT broker를 사용할 경우 `mqtt_bridge.py`가 snapshot을 publish하고, `mqtt_subscriber.py`가 broker payload를 `/api/edge-ingest`로 forward해 해당 AGV의 3D 색상, 클릭 패널, PHM 위험도를 즉시 바꿉니다. 물리 로봇 센서 연결은 이 MQTT subscriber의 upstream만 교체하면 됩니다. 데이터 출처와 적용 범위는 `/api/data-source`와 `/api/model-card`에서도 확인할 수 있습니다.
@@ -266,6 +267,7 @@ POST /predict
 | `GET /api/data-source` | Replay, live-model, rule-based PHM, edge-ingest boundaries |
 | `GET /api/phm` | AGV별 PHM forecast, risk score, RUL estimate, action |
 | `GET /api/phm?agv=AGV-03` | Single AGV PHM forecast |
+| `GET /api/rul-contract` | Supervised RUL 전환을 위한 feature, failure-time label, readiness contract |
 | `GET /api/dispatch-plan` | AGV별 운영 영향도, dispatch state, priority/SLA, work-order candidate |
 | `GET /api/dispatch-plan?agv=AGV-03` | Single AGV dispatch plan |
 

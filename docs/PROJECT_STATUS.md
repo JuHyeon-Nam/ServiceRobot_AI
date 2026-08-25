@@ -5,7 +5,7 @@
 The final portfolio artifact is a **tablet-operable real-time 3D digital twin
 and predictive-maintenance control center** for service robots / FAB AGV fleets.
 
-It should show four capabilities in one coherent demo:
+It should show five capabilities in one coherent demo:
 
 1. **AI PdM model**: diagnose normal + 8 fault states from robot sensor windows.
 2. **Real-time operations UI**: stream AGV state into a 2D/3D control center.
@@ -32,13 +32,13 @@ It should show four capabilities in one coherent demo:
 | External TSDB export contract | Done; Influx line protocol and Timescale SQL export | 85% |
 | Predictive maintenance work orders | Done | 100% |
 | Operations dispatch plan | Done; per-AGV impact, SLA, route-block risk, and work-order candidate | 100% |
-| PHM forecast contract | Done; heuristic RUL can be replaced by calibrated model | 85% |
+| PHM forecast contract | Done; heuristic RUL includes a supervised model slot and calibration contract | 92% |
 | Reliability, metrics, drift, model card | Done | 100% |
 | Portable deployment | Docker + compose + MQTT profile done; local Docker CLI unavailable here for manual run | 90% |
 | Physical/edge realism | MQTT contract + publisher + subscriber + Mosquitto profile + physical sensor adapter + TSDB export done | 96% |
 | Demo packaging | Visual demo hub, reviewer walkthrough, and capture checklist done; demo video still pending | 96% |
 
-Overall: **about 99% complete as a reviewable demo**, and **about 96% complete as
+Overall: **about 99% complete as a reviewable demo**, and **about 97% complete as
 a production-like robotics data platform**.
 
 ## What Is Already Demo-Ready
@@ -52,7 +52,10 @@ a production-like robotics data platform**.
 - `/api/data-source`: explicit disclosure of AI-Hub replay, live LightGBM inference,
   rule-based PHM/RUL, Edge TTL input, and physical-robot connection status.
 - `/api/phm`: PHM forecast summary with stage, severity, risk score, RUL estimate,
-  reasons, and recommended action.
+  reasons, recommended action, and a transparent RUL model slot.
+- `/api/rul-contract`: feature fields, failure-time label requirements, readiness
+  checks, and sample AGV feature vectors for replacing heuristic RUL with a
+  calibrated regression or survival model.
 - `/api/dispatch-plan`: converts model/PHM output into operations impact,
   affected zone, route-block risk, priority/SLA, and work-order candidate.
 - `/api/snapshot` inference block: live LightGBM Booster mode, feature count,
@@ -89,10 +92,10 @@ a production-like robotics data platform**.
 |---|---|---|
 | P1 | Demo video, 2-3 minutes | Makes the project instantly reviewable in portfolio/resume contexts. |
 | P1 | README demo-video link | Turns the repository front page into a one-click visual review path. |
-| P3 | Calibrated RUL model | Replaces heuristic PHM/RUL with failure-time-supervised regression or survival modeling. |
+| P3 | Calibrated RUL model | Train and validate regression or survival modeling after real failure-time labels are collected. |
 
 ## Recommended Next Three Daily Commits
 
 1. `docs(demo): add final video link placeholder`
-2. `feat(phm): add calibrated RUL training scaffold`
-3. `docs(model): add RUL data requirements note`
+2. `feat(phm): add labeled RUL dataset builder`
+3. `feat(phm): train calibrated RUL baseline when labels exist`

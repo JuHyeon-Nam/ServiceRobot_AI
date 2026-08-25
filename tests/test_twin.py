@@ -54,7 +54,7 @@ def test_demo_hub_page_served(client):
     assert r.status_code == 200
     assert "ServiceRobot_AI Demo Hub" in r.text
     for expected in ("/twin", "/api/phm", "/api/tsdb-export?fmt=influx",
-                     "/api/edge-ingest", "/api/ops-report?fmt=md",
+                     "/api/rul-contract", "/api/edge-ingest", "/api/ops-report?fmt=md",
                      "/api/model-card", "/assets/twin_3d.gif"):
         assert expected in r.text
 
@@ -88,8 +88,13 @@ def test_snapshot_contract(client):
     for key in ("id", "x", "y", "ang", "floor", "status", "pred", "label", "conf"):
         assert key in a, f"AGV 응답에 {key} 누락 (3D 렌더가 의존)"
     assert a["status"] in ("ok", "warn")
-    assert {"stage", "severity", "risk_score", "rul_estimate_min", "reasons", "action"} <= a["phm"].keys()
+    assert {"stage", "severity", "risk_score", "rul_estimate_min", "reasons", "action",
+            "rul_model"} <= a["phm"].keys()
     assert 0 <= a["phm"]["risk_score"] <= 100
+    assert a["phm"]["rul_model"]["schema"] == "fab.rul.calibration.v1"
+    assert a["phm"]["rul_model"]["mode"] == "heuristic_fallback"
+    assert {"health", "risk_score", "trend_slope", "vib", "batt", "temp",
+            "warn", "severity_code"} <= a["phm"]["rul_model"]["feature_vector"].keys()
     assert {"state", "priority", "sla_min", "impact_pct", "affected_zone", "route_block_risk",
             "work_order_required", "operator_action"} <= a["dispatch"].keys()
     assert 0 <= a["dispatch"]["impact_pct"] <= 100
@@ -127,6 +132,24 @@ def test_phm_forecast_endpoint(client):
     metrics = client.get("/metrics").text
     assert "fab_phm_max_risk_score" in metrics
     assert "fab_phm_predicted_fault_assets" in metrics
+
+
+def test_rul_contract_endpoint(client):
+    """PHM heuristic을 실제 RUL 모델로 교체하기 위한 feature/label/readiness 계약."""
+    r = client.get("/api/rul-contract")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["schema"] == "fab.rul.calibration.v1"
+    assert body["runtime_mode"] == "heuristic_fallback"
+    assert body["target"] == "minutes_to_failure"
+    assert {"health", "risk_score", "trend_slope", "vib", "batt", "temp",
+            "warn", "severity_code"} <= set(body["feature_fields"])
+    assert {"asset_id", "event_ts", "failure_ts", "failure_code",
+            "censoring"} <= set(body["label_fields"])
+    assert body["readiness"]["ready_for_supervised"] is False
+    assert body["sample_assets"], "RUL sample assets should make the contract inspectable"
+    first = body["sample_assets"][0]
+    assert first["rul_model"]["feature_vector"]["health"] == first["health"]
 
 
 def test_dispatch_plan_contract(client):

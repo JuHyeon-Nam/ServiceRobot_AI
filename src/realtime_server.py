@@ -29,6 +29,7 @@ from model_card import build_model_card
 from ops_report import build_ops_report, build_shift_handover, handover_to_markdown, report_to_markdown
 from pdm_runtime import load_runtime, predict_window, synthesize_live_window
 from reviewer_brief import build_reviewer_brief
+from rul_runtime import attach_rul_model_slot, rul_calibration_contract, rul_readiness_report
 from work_order_store import WorkOrderStore, priority_for, sla_seconds_for
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -305,6 +306,7 @@ DATA_SOURCE = {
     "streaming": "WebSocket /ws publishes each refreshed snapshot to the twin",
     "rule_based_parts": ["3D route animation", "PHM risk/RUL heuristic"],
     "model_based_parts": ["9-class fault diagnosis", "prediction confidence", "live inference metadata"],
+    "model_ready_contracts": ["RUL calibration contract"],
 }
 
 
@@ -396,7 +398,8 @@ def snapshot():
                 health = h["index"]
             if h.get("advice"):
                 advice = h["advice"]
-        phm = phm_forecast(trend, trend_dir, health, conf, warn, sensors)
+        phm = attach_rul_model_slot(phm_forecast(trend, trend_dir, health, conf, warn, sensors),
+                                    sensors, health, warn)
         dispatch = dispatch_plan(a, pred, level, health, trend_dir, phm, sensors)
         item = {"id": a["id"], "x": round(x, 2), "y": round(y, 2), "ang": round(ang, 1),
                 "floor": a["floor"], "status": "warn" if warn else "ok",
@@ -492,6 +495,27 @@ def api_phm(agv: str = None):
         "max_risk_score": max((r["phm"]["risk_score"] for r in rows), default=0),
     }
     return JSONResponse({"schema": "fab.phm.forecast.v1", "summary": summary, "assets": rows})
+
+
+@app.get("/api/rul-contract")
+def api_rul_contract():
+    """Supervised RUL model로 전환하기 위한 feature/label/readiness 계약."""
+    snap = snapshot()
+    samples = [
+        {
+            "id": a["id"],
+            "health": a["health"],
+            "status": a["status"],
+            "stage": a["phm"]["stage"],
+            "rul_model": a["phm"]["rul_model"],
+        }
+        for a in snap["agvs"][:5]
+    ]
+    return JSONResponse({
+        **rul_calibration_contract(),
+        "readiness": rul_readiness_report([]),
+        "sample_assets": samples,
+    })
 
 
 @app.get("/api/dispatch-plan")
