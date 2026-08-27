@@ -23,8 +23,14 @@ _DDL = """CREATE TABLE IF NOT EXISTS events(
   conf   REAL,
   level  TEXT,      -- 주의/경고/위험 (정상 이벤트는 적재 안 함)
   health INTEGER,   -- 0~100 자산 건전도
-  vib    REAL, batt REAL, temp REAL
+  vib    REAL, batt REAL, temp REAL,
+  risk_score REAL, trend_slope REAL
 )"""
+
+_EXTRA_COLUMNS = {
+    "risk_score": "REAL",
+    "trend_slope": "REAL",
+}
 
 
 class TelemetryStore:
@@ -34,11 +40,19 @@ class TelemetryStore:
         # check_same_thread=False: uvicorn의 워커 스레드/이벤트루프에서 공용 접근 허용
         self.cx = sqlite3.connect(path, check_same_thread=False)
         self.cx.execute(_DDL)
+        self._ensure_columns()
         self.cx.execute("CREATE INDEX IF NOT EXISTS ix_events_ts ON events(ts)")
         self.cx.execute("CREATE INDEX IF NOT EXISTS ix_events_agv ON events(agv, ts)")
         self.cx.commit()
         self.lock = threading.Lock()
         self.max_rows = max_rows
+
+    def _ensure_columns(self):
+        """Additive migration for durable TELEMETRY_DB files created by older builds."""
+        cols = {row[1] for row in self.cx.execute("PRAGMA table_info(events)").fetchall()}
+        for name, spec in _EXTRA_COLUMNS.items():
+            if name not in cols:
+                self.cx.execute(f"ALTER TABLE events ADD COLUMN {name} {spec}")
 
     def record(self, ts: float, agvs: list) -> int:
         """스트리밍 적재. 이상(warn) 또는 저건전도(health<80) 이벤트만 선별 저장.
@@ -47,13 +61,15 @@ class TelemetryStore:
         for a in agvs:
             if a.get("status") == "warn" or a.get("health", 100) < 80:
                 s = a.get("sensors") or {}
+                phm = a.get("phm") or {}
                 rows.append((ts, a["id"], a["floor"], a["pred"], a["conf"],
                              a.get("level"), a.get("health", 100),
-                             s.get("vib"), s.get("batt"), s.get("temp")))
+                             s.get("vib"), s.get("batt"), s.get("temp"),
+                             phm.get("risk_score"), phm.get("trend_slope")))
         if not rows:
             return 0
         with self.lock:
-            self.cx.executemany("INSERT INTO events VALUES(?,?,?,?,?,?,?,?,?,?)", rows)
+            self.cx.executemany("INSERT INTO events VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", rows)
             self.cx.commit()
         return len(rows)
 
@@ -70,7 +86,7 @@ class TelemetryStore:
         """설비 1대의 최근 진단 이벤트 이력(최신순)."""
         with self.lock:
             cur = self.cx.execute(
-                "SELECT ts,pred,conf,level,health,vib,batt,temp FROM events "
+                "SELECT ts,pred,conf,level,health,vib,batt,temp,risk_score,trend_slope FROM events "
                 "WHERE agv=? ORDER BY ts DESC LIMIT ?", (agv, limit))
             cols = [c[0] for c in cur.description]
             return [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -79,7 +95,7 @@ class TelemetryStore:
         """외부 TSDB export용 최근 이벤트 목록(최신순)."""
         with self.lock:
             cur = self.cx.execute(
-                "SELECT ts,agv,floor,pred,conf,level,health,vib,batt,temp FROM events "
+                "SELECT ts,agv,floor,pred,conf,level,health,vib,batt,temp,risk_score,trend_slope FROM events "
                 "WHERE ts>=? ORDER BY ts DESC LIMIT ?", (since, limit))
             cols = [c[0] for c in cur.description]
             return [dict(zip(cols, r)) for r in cur.fetchall()]

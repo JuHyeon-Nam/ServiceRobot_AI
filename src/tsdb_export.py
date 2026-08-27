@@ -24,7 +24,7 @@ def tsdb_contract() -> dict:
             "line_protocol_endpoint": "/api/tsdb-export?fmt=influx",
             "measurement": MEASUREMENT,
             "tags": ["site", "line", "agv", "floor", "pred", "level"],
-            "fields": ["conf", "health", "vib", "batt", "temp"],
+            "fields": ["conf", "health", "vib", "batt", "temp", "risk_score", "trend_slope"],
             "timestamp": "event ts in nanoseconds",
         },
         "timescale": {
@@ -72,6 +72,8 @@ def to_influx_lines(rows: list[dict], site: str = "demo-fab", line: str = "servi
             f"vib={_num(r.get('vib'))}",
             f"batt={_num(r.get('batt'))}",
             f"temp={_num(r.get('temp'))}",
+            f"risk_score={_num(r.get('risk_score'))}",
+            f"trend_slope={_num(r.get('trend_slope'))}",
         ])
         ts_ns = int(_num(r.get("ts")) * 1_000_000_000)
         out.append(f"{MEASUREMENT},{tags} {fields} {ts_ns}")
@@ -91,7 +93,9 @@ def timescale_schema() -> str:
   health INTEGER,
   vib DOUBLE PRECISION,
   batt DOUBLE PRECISION,
-  temp DOUBLE PRECISION
+  temp DOUBLE PRECISION,
+  risk_score DOUBLE PRECISION,
+  trend_slope DOUBLE PRECISION
 );
 SELECT create_hypertable('robot_pdm_events', 'ts', if_not_exists => TRUE);
 """
@@ -123,9 +127,11 @@ def to_timescale_sql(rows: list[dict], site: str = "demo-fab", line: str = "serv
             str(_num(r.get("vib"))),
             str(_num(r.get("batt"))),
             str(_num(r.get("temp"))),
+            str(_num(r.get("risk_score"))),
+            str(_num(r.get("trend_slope"))),
         ]) + ")")
     return timescale_schema() + "\nINSERT INTO robot_pdm_events " \
-        "(ts,site,line,agv,floor,pred,level,conf,health,vib,batt,temp) VALUES\n" \
+        "(ts,site,line,agv,floor,pred,level,conf,health,vib,batt,temp,risk_score,trend_slope) VALUES\n" \
         + ",\n".join(values) + "\nON CONFLICT DO NOTHING;\n"
 
 

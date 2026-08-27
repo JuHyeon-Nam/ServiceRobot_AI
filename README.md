@@ -93,6 +93,7 @@ flowchart LR
     store --> ops["stats / history / trend / reliability / fleet risk"]
     store --> tsdb["External TSDB export<br/>/api/tsdb-export"]
     twin --> phm["PHM forecast<br/>/api/phm"]
+    phm --> rul["RUL calibration dataset<br/>build_rul_dataset.py"]
     twin --> work["work-order queue<br/>/api/work-orders"]
     twin --> metrics["Prometheus /metrics"]
 ```
@@ -166,6 +167,8 @@ Feature engineering:
 | Evaluator | `src/evaluate_enhanced.py` | 저장 모델 성능 재측정 및 평가 artifact 생성 |
 | Inference API | `src/app.py` | `/predict`, `/health`, `/model-card` 제공 |
 | Runtime feature builder | `src/pdm_runtime.py` | 모델 로드, live feature 생성, 추론 실행 |
+| RUL runtime contract | `src/rul_runtime.py` | RUL feature vector, label/readiness contract, PHM model slot |
+| RUL dataset builder | `src/build_rul_dataset.py` | telemetry event와 failure label을 supervised RUL 학습 테이블로 조인 |
 | Realtime server | `src/realtime_server.py` | `/twin`, `/ws`, operational API 제공 |
 | FAB layout | `src/fab_layout.py` | 층, 장비, 트랙, AGV 경로 정의 |
 | Edge gateway | `src/edge_gateway.py` | AGV 상태를 MQTT-compatible telemetry envelope로 변환 |
@@ -406,6 +409,18 @@ python build_replay.py
 
 Validation split은 학습에 사용하지 않은 robot instance를 기준으로 평가하기 때문에 주요 성능 기준으로 사용합니다.
 
+실제 설비 failure label이 확보되면 RUL 학습 테이블은 다음 경로로 생성합니다.
+
+```bash
+cd src
+python build_rul_dataset.py \
+  --telemetry-db ../data/telemetry.sqlite \
+  --labels-csv ../data/failure_labels.csv \
+  --out-csv ../data/processed/rul_training.csv
+```
+
+`failure_labels.csv`는 최소 `asset_id`, `failure_ts`, `failure_code`를 포함해야 합니다. 출력 CSV는 `health`, `risk_score`, `trend_slope`, `vib`, `batt`, `temp` 등 `/api/rul-contract`의 feature contract와 동일한 컬럼을 사용합니다.
+
 ## Testing
 
 ```bash
@@ -418,6 +433,7 @@ Validation split은 학습에 사용하지 않은 robot instance를 기준으로
 - Realtime twin API contracts.
 - Live Booster inference fields.
 - Telemetry storage, retention, history, rollups, reliability metrics.
+- RUL calibration contract and supervised dataset builder.
 - Edge telemetry schema and API contract.
 - Physical sensor adapter line parsing and ingest payload conversion.
 - Work-order creation, SLA, overdue, status transitions.

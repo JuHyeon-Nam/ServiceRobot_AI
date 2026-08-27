@@ -28,11 +28,11 @@ It should show five capabilities in one coherent demo:
 | MQTT-style edge telemetry contract | Done | 100% |
 | Optional MQTT broker bridge | Done; publisher/subscriber runners plus Mosquitto compose smoke profile | 100% |
 | MQTT-fed sensor replay input | Done; inbound broker/API/physical-adapter payload overrides twin snapshot for a short TTL | 100% |
-| Telemetry storage / history / rollup | Done | 100% |
-| External TSDB export contract | Done; Influx line protocol and Timescale SQL export | 85% |
+| Telemetry storage / history / rollup | Done; stores PHM risk score and trend slope for RUL training | 100% |
+| External TSDB export contract | Done; Influx line protocol and Timescale SQL export include PHM/RUL features | 90% |
 | Predictive maintenance work orders | Done | 100% |
 | Operations dispatch plan | Done; per-AGV impact, SLA, route-block risk, and work-order candidate | 100% |
-| PHM forecast contract | Done; heuristic RUL includes a supervised model slot and calibration contract | 92% |
+| PHM forecast contract | Done; heuristic RUL includes supervised model slot, calibration contract, and dataset builder | 95% |
 | Reliability, metrics, drift, model card | Done | 100% |
 | Portable deployment | Docker + compose + MQTT profile done; local Docker CLI unavailable here for manual run | 90% |
 | Physical/edge realism | MQTT contract + publisher + subscriber + Mosquitto profile + physical sensor adapter + TSDB export done | 96% |
@@ -72,9 +72,13 @@ a production-like robotics data platform**.
   and subscriber; `--profile mqtt-smoke` runs a one-shot publisher smoke.
 - `/api/edge-ingest`: validates inbound edge/MQTT payloads and temporarily
   applies them to `/api/snapshot`, `/twin`, and PHM forecast output.
-- `/api/history`, `/api/stats`, `/api/trend`: telemetry persistence and analysis.
+- `/api/history`, `/api/stats`, `/api/trend`: telemetry persistence and analysis,
+  including risk score and trend slope needed by RUL training.
 - `/api/tsdb-contract`, `/api/tsdb-export?fmt=influx`,
-  `/api/tsdb-export?fmt=timescale`: external time-series DB export path.
+  `/api/tsdb-export?fmt=timescale`: external time-series DB export path with
+  PHM/RUL feature fields.
+- `src/build_rul_dataset.py`: joins stored telemetry with real failure labels to
+  produce a supervised-ready RUL training table.
 - `/api/reliability`: MTBF, MTTR, availability.
 - `/api/work-orders`: predictive fault / low-health AGVs converted to P1-P3
   maintenance work orders with status tracking.
@@ -92,10 +96,10 @@ a production-like robotics data platform**.
 |---|---|---|
 | P1 | Demo video, 2-3 minutes | Makes the project instantly reviewable in portfolio/resume contexts. |
 | P1 | README demo-video link | Turns the repository front page into a one-click visual review path. |
-| P3 | Calibrated RUL model | Train and validate regression or survival modeling after real failure-time labels are collected. |
+| P3 | Calibrated RUL model | Train and validate regression or survival modeling once enough real failure-time labels pass readiness checks. |
 
 ## Recommended Next Three Daily Commits
 
 1. `docs(demo): add final video link placeholder`
-2. `feat(phm): add labeled RUL dataset builder`
+2. `feat(phm): add synthetic failure-label smoke fixture for RUL builder`
 3. `feat(phm): train calibrated RUL baseline when labels exist`

@@ -303,7 +303,8 @@ def test_telemetry_store_pipeline():
     st = TelemetryStore(":memory:", max_rows=5)
     agvs = [
         {"id": "AGV-01", "floor": 0, "status": "warn", "pred": "E-RBT-B", "conf": 0.9,
-         "level": "위험", "health": 30, "sensors": {"vib": 7, "batt": 20, "temp": 55}},
+         "level": "위험", "health": 30, "sensors": {"vib": 7, "batt": 20, "temp": 55},
+         "phm": {"risk_score": 91, "trend_slope": 1.25}},
         {"id": "AGV-02", "floor": 1, "status": "ok", "pred": "정상", "conf": 0.99,
          "level": None, "health": 100, "sensors": {"vib": 2, "batt": 80, "temp": 38}},
     ]
@@ -311,6 +312,7 @@ def test_telemetry_store_pipeline():
     st.record(101.0, agvs)
     hist = st.history("AGV-01", 10)
     assert len(hist) == 2 and hist[0]["pred"] == "E-RBT-B"   # 최신순
+    assert hist[0]["risk_score"] == 91 and hist[0]["trend_slope"] == 1.25
     stats = st.stats()
     assert stats["total"] == 2 and stats["by_level"].get("위험") == 2
     assert stats["top_agv"][0]["agv"] == "AGV-01"
@@ -537,7 +539,7 @@ def test_trend_endpoint_and_csv_export(client):
     r = client.get("/api/history", params={"agv": "AGV-01", "fmt": "csv"})
     assert r.status_code == 200
     assert "text/csv" in r.headers["content-type"]
-    assert r.text.splitlines()[0] == "ts,pred,conf,level,health,vib,batt,temp"
+    assert r.text.splitlines()[0] == "ts,pred,conf,level,health,vib,batt,temp,risk_score,trend_slope"
 
 
 def test_tsdb_export_endpoints(client):
@@ -545,6 +547,7 @@ def test_tsdb_export_endpoints(client):
     contract = client.get("/api/tsdb-contract").json()
     assert contract["schema"] == "fab.telemetry.tsdb_export.v1"
     assert contract["supported_formats"] == ["json", "influx", "timescale"]
+    assert {"risk_score", "trend_slope"} <= set(contract["influx"]["fields"])
 
     influx = client.get("/api/tsdb-export", params={"fmt": "influx", "limit": 5})
     assert influx.status_code == 200

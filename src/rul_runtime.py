@@ -108,12 +108,15 @@ def rul_calibration_contract() -> dict:
 def rul_readiness_report(rows: Iterable[dict]) -> dict:
     """Check whether labeled event rows are sufficient for supervised RUL work."""
     records = list(rows)
-    missing = {
-        field
-        for row in records
-        for field in RUL_LABEL_FIELDS
-        if field not in row or row.get(field) in (None, "")
-    }
+    missing = set()
+    base_fields = ("asset_id", "event_ts", "failure_code", "censoring")
+    for row in records:
+        censored_row = row.get("censoring") in _CENSORED_VALUES
+        for field in base_fields:
+            if field not in row or row.get(field) in (None, ""):
+                missing.add(field)
+        if not censored_row and (row.get("failure_ts") in (None, "")):
+            missing.add("failure_ts")
     assets = {row.get("asset_id") for row in records if row.get("asset_id")}
     censored = sum(row.get("censoring") in _CENSORED_VALUES for row in records)
     failures = sum(

@@ -18,6 +18,8 @@ def _row(**overrides):
         "vib": 4.1,
         "batt": 19.5,
         "temp": 51.2,
+        "risk_score": 88,
+        "trend_slope": 0.75,
     }
     r.update(overrides)
     return r
@@ -31,6 +33,7 @@ def test_tsdb_contract_lists_supported_formats():
     assert c["schema"] == "fab.telemetry.tsdb_export.v1"
     assert c["supported_formats"] == ["json", "influx", "timescale"]
     assert c["influx"]["measurement"] == "robot_pdm_events"
+    assert {"risk_score", "trend_slope"} <= set(c["influx"]["fields"])
     assert c["timescale"]["hypertable"] is True
 
 
@@ -42,7 +45,7 @@ def test_influx_line_protocol_export():
     assert text.startswith("robot_pdm_events,site=demo-fab,line=service-robot-ai,agv=AGV-01")
     assert "pred=E-RBT-B" in text
     assert "level=위험" in text
-    assert "conf=0.91,health=24i,vib=4.1,batt=19.5,temp=51.2" in text
+    assert "conf=0.91,health=24i,vib=4.1,batt=19.5,temp=51.2,risk_score=88.0,trend_slope=0.75" in text
     assert text.rstrip().endswith("100123000000")
 
 
@@ -53,6 +56,8 @@ def test_timescale_sql_export():
 
     assert "CREATE TABLE IF NOT EXISTS robot_pdm_events" in sql
     assert "create_hypertable('robot_pdm_events', 'ts'" in sql
+    assert "risk_score DOUBLE PRECISION" in sql
+    assert "trend_slope DOUBLE PRECISION" in sql
     assert "INSERT INTO robot_pdm_events" in sql
     assert "'AGV''01'" in sql
 

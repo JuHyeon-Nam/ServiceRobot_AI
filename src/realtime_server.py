@@ -544,7 +544,8 @@ def api_dispatch_plan(agv: str = None):
     })
 
 
-_HIST_COLS = ["ts", "pred", "conf", "level", "health", "vib", "batt", "temp"]
+_HIST_COLS = ["ts", "pred", "conf", "level", "health", "vib", "batt", "temp",
+              "risk_score", "trend_slope"]
 
 
 @app.get("/api/history")
