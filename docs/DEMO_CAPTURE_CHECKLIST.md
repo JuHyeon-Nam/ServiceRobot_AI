@@ -44,6 +44,7 @@ printf '{"asset_id":"AGV-01","floor":0,"vib":6.2,"batt":42,"temp":61}\n' \
 - The live fault diagnosis path runs a LightGBM Booster, not a UI-only rule.
 - PHM/RUL is currently a transparent heuristic, and `/api/rul-contract` exposes the feature/label/readiness contract for a calibrated RUL or survival model.
 - `src/build_rul_dataset.py` can join telemetry events with future failure labels into a supervised RUL training table.
+- `src/train_rul_baseline.py` turns that table into an offline RUL regression baseline and reports median-baseline comparison metrics.
 - External input is already represented through `/api/edge-ingest`, MQTT publisher/subscriber, and `physical_sensor_adapter.py`.
 - The 3D twin is connected to operations: dispatch priority, SLA, work orders, reliability, telemetry history, and reports.
 - Data governance is visible through model card, drift, data-quality, and Prometheus metrics.

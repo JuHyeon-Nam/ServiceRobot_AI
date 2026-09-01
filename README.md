@@ -1,7 +1,7 @@
 # ServiceRobot_AI
 
 서비스 로봇 및 FAB-style AGV 플릿을 대상으로 한 **실시간 예지보전(Predictive Maintenance) 시스템**입니다.
-LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간 스트리밍, Three.js 3D 디지털 트윈, MQTT-compatible 엣지 텔레메트리 계약, RUL calibration contract, 선택형 MQTT broker publisher/subscriber, SQLite 시계열 저장소, 외부 TSDB export, 신뢰성 지표, 드리프트 모니터링, 정비 작업지시 큐를 하나의 실행 가능한 시스템으로 구성했습니다.
+LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간 스트리밍, Three.js 3D 디지털 트윈, MQTT-compatible 엣지 텔레메트리 계약, RUL calibration contract/baseline trainer, 선택형 MQTT broker publisher/subscriber, SQLite 시계열 저장소, 외부 TSDB export, 신뢰성 지표, 드리프트 모니터링, 정비 작업지시 큐를 하나의 실행 가능한 시스템으로 구성했습니다.
 
 [![CI](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml/badge.svg)](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml)
 
@@ -62,6 +62,7 @@ LightGBM 기반 고장 진단 모델, FastAPI 추론 서버, WebSocket 실시간
 | 시연 허브 | 주요 화면·운영 API·모델 산출물을 연결하는 데모 진입점 (`/demo`) |
 | PHM 예측 | 진단 추세, 건전도, 센서 임계 신호 기반 위험도/RUL 추정 (`/api/phm`) |
 | RUL 전환 계약 | 실제 failure-time label 확보 시 학습형 RUL/survival 모델로 교체하기 위한 feature/label/readiness 계약 (`/api/rul-contract`) |
+| RUL baseline | `rul_training.csv`에서 observed failure row만 사용해 median baseline 대비 회귀 성능을 측정하는 오프라인 trainer |
 | 엣지 텔레메트리 | MQTT-compatible topic/payload contract, broker publisher/subscriber, inbound edge ingest (`/api/edge-contract`, `/api/edge-events`, `/api/edge-ingest`, `mqtt_bridge.py`, `mqtt_subscriber.py`) |
 | 시계열 저장 | SQLite 이벤트 저장, 이력 조회, rollup, CSV/Influx/Timescale export, retention |
 | 신뢰성/리스크 지표 | MTBF, MTTR, availability, floor별 운영 risk 분석 (`/api/reliability`, `/api/fleet-risk`) |
@@ -94,6 +95,7 @@ flowchart LR
     store --> tsdb["External TSDB export<br/>/api/tsdb-export"]
     twin --> phm["PHM forecast<br/>/api/phm"]
     phm --> rul["RUL calibration dataset<br/>build_rul_dataset.py"]
+    rul --> rulmodel["RUL baseline trainer<br/>train_rul_baseline.py"]
     twin --> work["work-order queue<br/>/api/work-orders"]
     twin --> metrics["Prometheus /metrics"]
 ```
@@ -169,6 +171,7 @@ Feature engineering:
 | Runtime feature builder | `src/pdm_runtime.py` | 모델 로드, live feature 생성, 추론 실행 |
 | RUL runtime contract | `src/rul_runtime.py` | RUL feature vector, label/readiness contract, PHM model slot |
 | RUL dataset builder | `src/build_rul_dataset.py` | telemetry event와 failure label을 supervised RUL 학습 테이블로 조인 |
+| RUL baseline trainer | `src/train_rul_baseline.py` | observed failure row만 사용해 Gradient Boosting RUL baseline과 median baseline metrics 산출 |
 | Realtime server | `src/realtime_server.py` | `/twin`, `/ws`, operational API 제공 |
 | FAB layout | `src/fab_layout.py` | 층, 장비, 트랙, AGV 경로 정의 |
 | Edge gateway | `src/edge_gateway.py` | AGV 상태를 MQTT-compatible telemetry envelope로 변환 |
@@ -417,9 +420,13 @@ python build_rul_dataset.py \
   --telemetry-db ../data/telemetry.sqlite \
   --labels-csv ../data/failure_labels.csv \
   --out-csv ../data/processed/rul_training.csv
+python train_rul_baseline.py \
+  --train-csv ../data/processed/rul_training.csv \
+  --model-out ../data/processed/rul_baseline.pkl \
+  --meta-json ../data/processed/rul_baseline_meta.json
 ```
 
-`failure_labels.csv`는 최소 `asset_id`, `failure_ts`, `failure_code`를 포함해야 합니다. 출력 CSV는 `health`, `risk_score`, `trend_slope`, `vib`, `batt`, `temp` 등 `/api/rul-contract`의 feature contract와 동일한 컬럼을 사용합니다.
+`failure_labels.csv`는 최소 `asset_id`, `failure_ts`, `failure_code`를 포함해야 합니다. 출력 CSV는 `health`, `risk_score`, `trend_slope`, `vib`, `batt`, `temp` 등 `/api/rul-contract`의 feature contract와 동일한 컬럼을 사용합니다. 현재 repository의 `tests/fixtures/rul_events.csv`와 `tests/fixtures/rul_failure_labels.csv`는 파이프라인 동작을 확인하기 위한 smoke fixture이며, 현장 정확도를 주장하는 데이터가 아닙니다.
 
 ## Testing
 
@@ -433,7 +440,7 @@ python build_rul_dataset.py \
 - Realtime twin API contracts.
 - Live Booster inference fields.
 - Telemetry storage, retention, history, rollups, reliability metrics.
-- RUL calibration contract and supervised dataset builder.
+- RUL calibration contract, supervised dataset builder, and offline baseline trainer.
 - Edge telemetry schema and API contract.
 - Physical sensor adapter line parsing and ingest payload conversion.
 - Work-order creation, SLA, overdue, status transitions.

@@ -1,0 +1,4 @@
+asset_id,failure_ts,failure_code,censoring
+AGV-01,360,E-RBT-B,false
+AGV-02,420,E-RBT-S,false
+AGV-03,480,E-ENV-O,false

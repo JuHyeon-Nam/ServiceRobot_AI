@@ -8,6 +8,7 @@ __pycache__/
 *.npy
 *.parquet
 *.csv
+!tests/fixtures/*.csv
 data/
 
 # 3. AI 모델 가중치 파일 (용량이 큼)
