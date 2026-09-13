@@ -11,7 +11,7 @@ AI-Hub 서비스 로봇 센서 데이터를 이용해 **센서 구간 생성, �
 ![SQLite](https://img.shields.io/badge/SQLite-telemetry-003B57?style=flat-square&logo=sqlite&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-compose-2496ED?style=flat-square&logo=docker&logoColor=white)
 
-[전체 포트폴리오](https://github.com/JuHyeon-Nam/JuHyeon-Nam-archive)
+[GitHub 프로필](https://github.com/JuHyeon-Nam)
 
 ## Demo
 
