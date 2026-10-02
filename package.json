@@ -1,0 +1,11 @@
+{
+  "name": "servicerobot-twin-checks",
+  "private": true,
+  "scripts": {
+    "test:ui": "node scripts/verify_twin.mjs",
+    "capture:demo": "node scripts/capture_demo.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

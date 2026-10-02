@@ -32,31 +32,20 @@ def test_twin_page_served(client):
 def test_twin_phm_patrol_cues(client):
     r = client.get("/twin")
     assert r.status_code == 200
-    assert "순찰 모드" in r.text
-    assert "PHM 단계" in r.text
-    assert "PHM 위험도" in r.text
-    assert "예상 대응시점" in r.text
-    assert "운영 Dispatch" in r.text
-    assert "selImpactBar" in r.text
-    assert "selWorkOrder" in r.text
-    assert "Edge 입력" in r.text
-    assert "데이터 출처" in r.text
-    assert "sourceStat" in r.text
-    assert "focus = agvMesh" in r.text
-    assert "#sel { position:fixed" in r.text
-    assert "#title p { display:none; }" in r.text
-    assert "phmStage" in r.text
-    assert "autoRotate" in r.text
+    for element in ('id="assetList"', 'id="scenarioSelect"', 'id="ordersView"',
+                    'id="evidenceView"', 'id="viewport"'):
+        assert element in r.text
+    for path in ('/static/twin.js', '/static/twin-scene.js', '/static/twin.css',
+                 '/static/vendor/lucide.min.js'):
+        assert client.get(path).status_code == 200
 
 
 def test_demo_hub_page_served(client):
     r = client.get("/demo")
     assert r.status_code == 200
-    assert "ServiceRobot_AI Demo Hub" in r.text
-    for expected in ("/twin", "/api/phm", "/api/tsdb-export?fmt=influx",
-                     "/api/rul-contract", "/api/edge-ingest", "/api/ops-report?fmt=md",
-                     "/api/model-card", "/assets/twin_3d.gif"):
-        assert expected in r.text
+    assert r.text == client.get('/twin').text
+    assert 'data-view="orders"' in r.text
+    assert 'data-view="evidence"' in r.text
 
 
 def test_demo_assets_served(client):
@@ -539,7 +528,7 @@ def test_trend_endpoint_and_csv_export(client):
     r = client.get("/api/history", params={"agv": "AGV-01", "fmt": "csv"})
     assert r.status_code == 200
     assert "text/csv" in r.headers["content-type"]
-    assert r.text.splitlines()[0] == "ts,pred,conf,level,health,vib,batt,temp,risk_score,trend_slope"
+    assert r.text.splitlines()[0] == "ts,pred,conf,level,health,vib,batt,temp,risk_score,trend_slope,source"
 
 
 def test_tsdb_export_endpoints(client):

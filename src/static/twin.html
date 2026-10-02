@@ -1,827 +1,371 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>FAB 3D 디지털 트윈 · 실시간 PdM 관제</title>
-<style>
-  :root { --ok:#16a34a; --warn:#dc2626; --bg:#eef3f8; --panel:rgba(255,255,255,.92); --line:#cbd5e1; --ink:#172033; --muted:#5b6b83; }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html,body { margin:0; height:100%; overflow:hidden; background:var(--bg);
-    font-family:"맑은 고딕","Malgun Gothic",system-ui,sans-serif; color:var(--ink); }
-  #app { position:fixed; inset:0; }
-  canvas { display:block; touch-action:none; }
-  .hud { position:fixed; pointer-events:none; }
-  #title { top:14px; left:16px; }
-  #title h1 { margin:0; font-size:22px; letter-spacing:0; color:var(--ink); }
-  #title p { margin:4px 0 0; font-size:14px; color:var(--muted); font-weight:700; }
-  #kpi { top:14px; right:16px; display:flex; gap:10px; }
-  .chip { background:var(--panel); border:1px solid var(--line); border-radius:8px;
-    padding:10px 14px; min-width:78px; text-align:center; backdrop-filter:blur(10px);
-    box-shadow:0 10px 24px rgba(30,42,62,.10); }
-  .chip b { display:block; font-size:26px; line-height:1.1; }
-  .chip span { font-size:13px; color:var(--muted); font-weight:800; }
-  #alerts { bottom:16px; left:16px; width:360px; max-height:42vh; overflow:hidden;
-    background:var(--panel); border:1px solid var(--line); border-radius:8px; backdrop-filter:blur(10px);
-    box-shadow:0 14px 32px rgba(30,42,62,.12); }
-  #alerts h2 { margin:0; padding:13px 16px; font-size:16px; border-bottom:1px solid var(--line); }
-  #alertList { padding:8px 12px 12px; }
-  .alert { display:flex; justify-content:space-between; gap:8px; padding:8px 6px; font-size:14px;
-    border-bottom:1px dashed var(--line); }
-  .alert .id { color:#9f1239; font-weight:800; }
-  .alert .cf { color:var(--muted); }
-  .lv { font-size:12px; font-weight:800; padding:2px 8px; border-radius:999px; white-space:nowrap; }
-  .lv-위험 { background:#ff3b3b; color:#fff; }
-  .lv-경고 { background:#ff9f1a; color:#231400; }
-  .lv-주의 { background:#ffe14d; color:#2a2400; }
-  #sel { position:fixed; bottom:16px; right:16px; width:360px; max-height:calc(100vh - 32px); overflow-y:auto; background:var(--panel); border:1px solid var(--line);
-    border-radius:8px; backdrop-filter:blur(10px); pointer-events:auto; display:none;
-    box-shadow:0 14px 32px rgba(30,42,62,.14); }
-  #sel h2 { margin:0; padding:13px 16px; font-size:18px; border-bottom:1px solid var(--line);
-    display:flex; justify-content:space-between; align-items:center; }
-  #sel .body { padding:13px 16px; font-size:15px; }
-  #sel .row { display:flex; justify-content:space-between; gap:12px; padding:6px 0; }
-  #sel .row span:first-child { color:var(--muted); font-weight:800; }
-  #sel .badge { font-size:13px; padding:4px 10px; border-radius:999px; font-weight:800; text-align:right; }
-  #sel .close { pointer-events:auto; cursor:pointer; color:var(--muted); font-size:24px; line-height:1; }
-  #sel .hbar { height:10px; background:#e5edf6; border:1px solid var(--line); border-radius:5px; overflow:hidden; margin:5px 0 7px; }
-  #sel .hbar i { display:block; height:100%; border-radius:5px; transition:width .35s, background .35s; }
-  #sel .ops { margin-top:9px; border:1px solid var(--line); border-radius:8px; background:#f8fafc; padding:9px 10px; }
-  #sel .ops .ot { display:flex; justify-content:space-between; gap:10px; font-size:13px; color:var(--muted); font-weight:800; margin-bottom:6px; }
-  #sel .ops .ot b { color:var(--ink); }
-  #sel .ops .impact { height:12px; background:#e5edf6; border:1px solid var(--line); border-radius:6px; overflow:hidden; margin:6px 0 8px; }
-  #sel .ops .impact i { display:block; height:100%; width:0%; background:#22c55e; border-radius:6px; transition:width .35s, background .35s; }
-  #sel .ops .oline { display:flex; justify-content:space-between; gap:10px; padding:3px 0; font-size:13px; }
-  #sel .ops .oline span:first-child { color:var(--muted); font-weight:800; white-space:nowrap; }
-  #sel .ops .oline span:last-child { text-align:right; font-weight:800; color:var(--ink); }
-  #sel .sens { margin-top:9px; border-top:1px solid var(--line); padding-top:8px; }
-  #sel .sg { margin-bottom:7px; }
-  #sel .sg label { display:flex; justify-content:space-between; font-size:13px; color:var(--muted); margin-bottom:4px; font-weight:800; }
-  #sel .sg label em { font-style:normal; font-weight:800; color:var(--ink); }
-  #sel .sg canvas { width:100%; height:40px; display:block; background:#f1f5f9;
-    border:1px solid var(--line); border-radius:6px; }
-  #sel .cause { margin-top:9px; border-top:1px solid var(--line); padding-top:8px; }
-  #sel .cause .ct { font-size:13px; color:var(--muted); margin-bottom:5px; font-weight:800; }
-  #sel .cause ul { margin:0; padding-left:16px; font-size:14px; line-height:1.6; color:var(--ink); }
-  #sel .trend { margin-top:9px; border-top:1px solid var(--line); padding-top:8px; }
-  #sel .trend .tt { font-size:13px; color:var(--muted); margin-bottom:5px; font-weight:800; }
-  #sel .trend .tt span { color:var(--ink); font-weight:800; }
-  #sel .trow { display:flex; gap:3px; height:18px; }
-  #sel .trow i { flex:1; border-radius:2px; background:#22c55e; }
-  #sel .tleg { display:flex; gap:10px; margin-top:6px; font-size:12px; color:var(--muted); }
-  #sel .tleg i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:3px; vertical-align:middle; }
-  #fleet { top:14px; left:50%; transform:translateX(-50%); width:390px;
-    background:var(--panel); border:1px solid var(--line); border-radius:8px;
-    padding:10px 14px 11px; backdrop-filter:blur(10px); box-shadow:0 10px 24px rgba(30,42,62,.10); }
-  #fleet .ft { display:flex; justify-content:space-between; font-size:13px; color:var(--muted); margin-bottom:4px; font-weight:800; }
-  #fleet .ft b { color:var(--ink); font-weight:800; }
-  #fleet canvas { width:100%; height:46px; display:block; }
-  #fleet .fl { display:flex; gap:12px; margin-top:3px; font-size:10px; color:var(--muted); }
-  #fleet .fl i { display:inline-block; width:9px; height:3px; border-radius:2px; margin-right:4px; vertical-align:middle; }
-  #sel .hist { margin-top:9px; border-top:1px solid var(--line); padding-top:8px; }
-  #sel .hist .ht { display:flex; justify-content:space-between; font-size:13px; color:var(--muted); margin-bottom:5px; font-weight:800; }
-  #sel .hist .ht a { color:#2563eb; text-decoration:none; pointer-events:auto; }
-  #sel .hist .hrow { display:flex; justify-content:space-between; gap:6px; font-size:12px; padding:3px 0;
-    border-bottom:1px dashed var(--line); }
-  #sel .hist .hrow .tm { color:var(--muted); }
-  #sel .hist .hrow .hh { color:var(--muted); min-width:30px; text-align:right; }
-  #legend { bottom:16px; left:50%; transform:translateX(-50%); display:flex; gap:16px;
-    background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:9px 18px; font-size:14px; font-weight:800; }
-  #legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
-  #hint { top:76px; left:16px; font-size:13px; color:var(--muted); font-weight:700; }
-  #dataStat { top:99px; left:16px; font-size:13px; color:#1d4ed8; font-weight:800; }
-  #sourceStat { top:124px; left:16px; width:460px; max-width:calc(100vw - 32px); font-size:13px; line-height:1.4; color:#334155; font-weight:800;
-    background:rgba(255,255,255,.78); border:1px solid var(--line); border-radius:8px; padding:7px 10px; backdrop-filter:blur(10px); }
-  #status { top:55px; right:16px; font-size:13px; color:var(--muted); font-weight:800; }
-  #focusBtn { position:fixed; top:84px; right:16px; pointer-events:auto; cursor:pointer;
-    background:#dc2626; color:#fff; border:1px solid #b91c1c; border-radius:8px;
-    padding:10px 16px; font-size:14px; font-weight:800; font-family:inherit; backdrop-filter:blur(10px); }
-  #focusBtn:disabled { background:var(--panel); color:#64748b; border-color:var(--line); cursor:default; }
-  #offline { position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:20; }
-  #offline .box { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:22px 28px;
-    text-align:center; max-width:480px; backdrop-filter:blur(6px); }
-  #offline .t { font-size:17px; font-weight:700; color:#b45309; margin-bottom:10px; }
-  #offline .d { font-size:13px; color:var(--muted); line-height:1.6; }
-  #offline code { background:#eff6ff; border:1px solid var(--line); border-radius:5px; padding:2px 7px; color:#1d4ed8; }
-  #fsBtn { position:fixed; top:14px; right:16px; pointer-events:auto; cursor:pointer; z-index:15;
-    width:40px; height:40px; display:none; align-items:center; justify-content:center;
-    background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:10px;
-    font-size:18px; line-height:1; backdrop-filter:blur(6px); }
-  body.fs #fsBtn { background:rgba(34,60,110,.85); }
-  #patrol { top:174px; left:16px; display:flex; gap:8px; align-items:center;
-    background:var(--panel); border:1px solid var(--line); border-radius:999px;
-    padding:9px 14px; font-size:13px; color:var(--muted); backdrop-filter:blur(10px); font-weight:800; }
-  #patrol b { color:var(--ink); font-weight:800; }
-  #patrol i { display:inline-block; width:9px; height:9px; border-radius:50%; background:#16a34a; }
-  /* ===== A5: 태블릿/세로 화면 반응형 — 패널 축소·재배치, 큰 터치 타깃 ===== */
-  @media (max-width: 820px) {
-    #fsBtn { display:flex; }                 /* 전시 태블릿: 풀스크린 버튼 노출 */
-    #kpi { top:62px; bottom:auto; right:12px; }
-    #focusBtn { top:112px; bottom:auto; right:12px; padding:11px 16px; font-size:13px; }
-    #alerts { width:min(46vw, 260px); max-height:30vh; }
-    #sel { width:min(80vw, 300px); }
-    #hint, #dataStat, #sourceStat, #fleet, #patrol { display:none; }
-    #status { top:158px; right:12px; background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:5px 9px; }
-    #title h1 { font-size:15px; }
-    #sel .close { font-size:24px; padding:0 4px; }   /* 손가락 탭 타깃 확대 */
-  }
-  @media (max-width: 560px) {                 /* 세로 폰/소형 태블릿 */
-    #title p { display:none; }
-    #kpi { top:52px; right:8px; gap:4px; }
-    .chip { min-width:44px; padding:5px 7px; }
-    .chip b { font-size:17px; }
-    #focusBtn { top:102px; right:8px; padding:8px 10px; font-size:12px; }
-    #status { top:146px; right:8px; font-size:12px; }
-    #alerts { left:8px; bottom:12px; width:min(52vw, 220px); }
-    #sel { right:8px; bottom:12px; width:min(88vw, 300px); }
-    #legend { display:none; }
-  }
-</style>
-</head>
-<body>
-<div id="app"></div>
-
-<div class="hud" id="title">
-  <h1>🏭 FAB 3D 디지털 트윈 · 실시간 PdM 관제</h1>
-  <p>3개 층 · AGV 플릿 · AI 이상 진단 실시간 (LightGBM PdM)</p>
-</div>
-<div class="hud" id="hint">🖐 한 손가락 회전 · 두 손가락 확대/이동 · 설비 탭 → AI 진단 · 더블탭 → 시점 리셋</div>
-<div class="hud" id="dataStat">🗄 시계열 적재 대기…</div>
-<div class="hud" id="sourceStat">데이터 소스 확인 중…</div>
-<div class="hud" id="patrol"><i></i><span><b>순찰 모드</b> · 천천히 회전 중 · 경고 발생 시 자동 포커스</span></div>
-<button id="fsBtn" title="풀스크린">⛶</button>
-<div class="hud" id="status">● 연결 중…</div>
-<button id="focusBtn" disabled>🎯 경고 없음</button>
-
-<div class="hud" id="kpi">
-  <div class="chip"><b id="kTotal">–</b><span>가동</span></div>
-  <div class="chip"><b id="kOk" style="color:var(--ok)">–</b><span>정상</span></div>
-  <div class="chip"><b id="kWarn" style="color:var(--warn)">–</b><span>경고</span></div>
-  <div class="chip"><b id="kMaint" style="color:#fb923c">–</b><span>정비</span></div>
-</div>
-
-<div class="hud" id="fleet">
-  <div class="ft"><span>📈 플릿 추이 <b>경고·건전도</b></span><span id="ftNow"></span></div>
-  <canvas id="fleetChart" width="612" height="92"></canvas>
-  <div class="fl">
-    <span><i style="background:#ef4444"></i>경고 이벤트/버킷</span>
-    <span><i style="background:#22c55e"></i>평균 건전도(0~100)</span>
-  </div>
-</div>
-
-<div class="hud" id="legend">
-  <span><i style="background:#22c55e"></i>정상</span>
-  <span><i style="background:#facc15"></i>주의</span>
-  <span><i style="background:#fb923c"></i>경고</span>
-  <span><i style="background:#ef4444"></i>위험</span>
-  <span><i style="background:#8aa0d8"></i>설비</span>
-</div>
-
-<div class="hud" id="alerts">
-  <h2>🚨 실시간 이상 경고 <span id="deteriorating"></span></h2>
-  <div id="alertList"><div class="alert"><span class="cf">대기 중…</span></div></div>
-</div>
-
-<div id="offline">
-  <div class="box">
-    <div class="t">⚠ 관제 서버에 연결되지 않았습니다</div>
-    <div class="d">이 3D 트윈은 <b>실시간 서버가 데이터를 공급해야</b> 동작합니다.<br>
-      터미널에서 <code>cd src</code> 후 <code>uvicorn realtime_server:app</code> 를 실행하고<br>
-      <b>http://127.0.0.1:8000/twin</b> 으로 접속하세요.</div>
-  </div>
-</div>
-
-<div id="sel">
-  <h2><span id="selId">AGV</span><span class="close" id="selClose">✕</span></h2>
-  <div class="body">
-    <div class="row"><span>진단</span><span id="selPred" class="badge">–</span></div>
-    <div class="row"><span>신뢰도</span><span id="selConf">–</span></div>
-    <div class="row"><span>층</span><span id="selFloor">–</span></div>
-    <div class="row"><span>상태</span><span id="selStatus">–</span></div>
-    <div class="row"><span>PHM 단계</span><span id="selPhm" class="badge">–</span></div>
-    <div class="row"><span>PHM 위험도</span><span id="selPhmRisk">–</span></div>
-    <div class="row"><span>예상 대응시점</span><span id="selRul">–</span></div>
-    <div class="ops">
-      <div class="ot"><span>운영 Dispatch</span><b id="selDispatchState">–</b></div>
-      <div class="ot"><span>영향도</span><b id="selImpactText">–</b></div>
-      <div class="impact"><i id="selImpactBar"></i></div>
-      <div class="oline"><span>우선순위/SLA</span><span id="selPriority">–</span></div>
-      <div class="oline"><span>영향 구역</span><span id="selZone">–</span></div>
-      <div class="oline"><span>작업지시</span><span id="selWorkOrder">–</span></div>
-    </div>
-    <div class="row"><span>Edge 입력</span><span id="selEdge" class="badge">–</span></div>
-    <div class="row"><span>데이터 출처</span><span id="selSource">–</span></div>
-    <div class="row"><span>건전도(Health)</span><span id="selHealth">–</span></div>
-    <div class="hbar"><i id="selHealthBar"></i></div>
-    <div class="row"><span>정비 권고</span><span id="selAdvice" class="badge">–</span></div>
-    <div class="sens">
-      <div class="sg"><label>진동 <em id="svVib">–</em> mm/s</label><canvas id="cVib" width="240" height="34"></canvas></div>
-      <div class="sg"><label>배터리 <em id="svBatt">–</em> %</label><canvas id="cBatt" width="240" height="34"></canvas></div>
-      <div class="sg"><label>온도 <em id="svTemp">–</em> °C</label><canvas id="cTemp" width="240" height="34"></canvas></div>
-    </div>
-    <div class="cause">
-      <div class="ct">🧠 AI 판단 근거 · 주요 이상 신호</div>
-      <ul id="causeList"><li>–</li></ul>
-    </div>
-    <div class="trend">
-      <div class="tt">📈 진단 추세 · 최근 이력 <span id="trendNow"></span></div>
-      <div class="trow" id="trendRow"></div>
-      <div class="tleg"><span><i style="background:#22c55e"></i>정상</span><span><i style="background:#facc15"></i>주의</span><span><i style="background:#fb923c"></i>경고</span><span><i style="background:#ef4444"></i>위험</span></div>
-    </div>
-    <div class="hist">
-      <div class="ht"><span>🗄 적재된 이벤트 이력</span><a id="histCsv" href="#" target="_blank">CSV ↓</a></div>
-      <div class="ht" style="margin-bottom:4px"><span>🛠 신뢰성</span><span id="relLine" style="color:#172033">–</span></div>
-      <div id="histList"><div class="hrow"><span class="tm">이력 없음</span></div></div>
-    </div>
-  </div>
-</div>
-
-<!-- 오프라인 벤더링(A6): 전시장 인터넷 없이도 구동. Three.js를 /static/vendor에 로컬 동봉. -->
-<script type="importmap">
-{ "imports": {
-  "three": "/static/vendor/three/build/three.module.js",
-  "three/addons/": "/static/vendor/three/examples/jsm/"
-}}
-</script>
-<script type="module">
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-
-const FLOOR_GAP = 34;          // 층 간 높이(world)
-const S = 1.0;                 // 좌표 스케일
-const CX = 150, CZ_OFF = 26;   // 중심 보정(캔버스 300x196)
-
-const app = document.getElementById('app');
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xeef3f8);
-scene.fog = new THREE.Fog(0xeef3f8, 280, 680);
-
-const camera = new THREE.PerspectiveCamera(52, innerWidth/innerHeight, 0.1, 2000);
-camera.position.set(150, 150, 230);
-const HOME_POS = new THREE.Vector3(150, 150, 230);   // 더블탭 시 복귀할 홈 시점
-const HOME_TGT = new THREE.Vector3(0, FLOOR_GAP, 0);
-
-const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.setSize(innerWidth, innerHeight);
-app.appendChild(renderer.domElement);
-
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-controls.target.set(0, FLOOR_GAP, 0);
-controls.minDistance = 60; controls.maxDistance = 520;
-controls.maxPolarAngle = Math.PI * 0.49;
-controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
-controls.autoRotate = true;
-controls.autoRotateSpeed = 0.10;
-
-scene.add(new THREE.AmbientLight(0xffffff, 0.85));
-scene.add(new THREE.HemisphereLight(0xffffff, 0xc6d3e1, 0.95));   // 밝은 전시장/관제 조명
-const dir = new THREE.DirectionalLight(0xffffff, 0.95);
-dir.position.set(120, 240, 160); scene.add(dir);
-const fill = new THREE.DirectionalLight(0x9db7d8, 0.55);          // 반대편 필 라이트(입체감)
-fill.position.set(-140, 90, -120); scene.add(fill);
-const grid = new THREE.GridHelper(640, 32, 0xa7b4c5, 0xd5dde8);
-grid.position.y = -2; scene.add(grid);
-
-// floorY: build_agv_plan floor index 0=2F(top),1=1F,2=B1(bottom)
-const floorY = f => (2 - f) * FLOOR_GAP;
-const wx = x => (x - CX) * S;
-const wz = (y, y0) => (y - y0 - CZ_OFF) * S;
-
-const agvGroup = new THREE.Group(); scene.add(agvGroup);
-const agvMesh = {};           // id -> {mesh, target:{x,y,z,ang}}
-let LAYOUT = null, FLOOR_Y0 = {};
-
-const OK = new THREE.Color(0x22c55e), WARN = new THREE.Color(0xef4444);
-const LVLCOL = { '주의': 0xfacc15, '경고': 0xfb923c, '위험': 0xef4444 };  // 심각도별 색(정상=초록)
-
-function phmStage(a) {
-  if (a.phm) {
-    const stageText = {
-      current_fault: '현재 이상 · 즉시 원인 확인',
-      predicted_fault: '예측 이상 · 점검 권장',
-      watch: '예측 이상 · 모니터링',
-      normal: '정상 운전'
-    }[a.phm.stage] || '정상 운전';
-    return { level: a.phm.severity === '정상' ? null : a.phm.severity, text: stageText, current: a.phm.stage === 'current_fault' };
-  }
-  if (a.status === 'warn') {
-    return { level: a.level || '위험', text: '현재 이상 · 즉시 원인 확인', current: true };
-  }
-  const h = a.health ?? 100;
-  if (a.trend_dir === '악화' || h < 80) {
-    const level = h < 65 ? '경고' : '주의';
-    return { level, text: level === '경고' ? '예측 이상 · 점검 권장' : '예측 이상 · 모니터링', current: false };
-  }
-  return { level: null, text: '정상 운전', current: false };
-}
-
-function buildLayout(L) {
-  LAYOUT = L;
-  L.floors.forEach((fl, fi) => {
-    FLOOR_Y0[fi] = fl.y0;
-    const ey = floorY(fi);
-    // floor slab
-    const x0 = 8, x1 = 252, zA = fl.geo.yA, zC = fl.geo.yC;
-    const w = (x1 - x0) * S, d = (zC - zA) * S;
-    const slab = new THREE.Mesh(
-      new THREE.BoxGeometry(w, 1.4, d),
-      new THREE.MeshStandardMaterial({ color:0xdbe5f0, transparent:true, opacity:0.96, roughness:0.9 }));
-    slab.position.set(((x0+x1)/2 - CX)*S, ey, ((zA+zC)/2 - fl.y0 - CZ_OFF)*S);
-    scene.add(slab);
-    // 공정 설비 — 베이스 플린스 + 본체(베이별 색 변주·높이 변주) + 상단 서비스 유닛 + 로드포트(FOUP)
-    const BAYCOL = [0x9aa9bd, 0xa8b6c7, 0x8fa2ba, 0xb4bfcc, 0x99adbf];
-    fl.tools.forEach(t => {
-      const th = 9 + (t.label.charCodeAt(t.label.length - 1) % 4) * 1.8;    // 높이 변주(균일 격자 탈피)
-      const bc = BAYCOL[t.label.charCodeAt(0) % BAYCOL.length];             // 베이별 색 변주
-      const cx3 = wx(t.cx), cz3 = wz(t.cy, fl.y0);
-      const base = new THREE.Mesh(new THREE.BoxGeometry(t.w*S+2, 1.6, t.h*S+2),  // 바닥 받침
-        new THREE.MeshStandardMaterial({ color:0xc3cfdd, roughness:0.9 }));
-      base.position.set(cx3, ey + 1.3, cz3); scene.add(base);
-      const m = new THREE.Mesh(new THREE.BoxGeometry(t.w*S, th, t.h*S),          // 본체
-        new THREE.MeshStandardMaterial({ color:bc, roughness:0.5, metalness:0.32 }));
-      m.position.set(cx3, ey + th/2 + 1.6, cz3); scene.add(m);
-      const edge = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),
-        new THREE.LineBasicMaterial({ color:0x65758b }));
-      edge.position.copy(m.position); scene.add(edge);
-      const top = new THREE.Mesh(new THREE.BoxGeometry(t.w*S*0.5, 3, t.h*S*0.5), // 상단 유닛(EFEM/팬필터)
-        new THREE.MeshStandardMaterial({ color:0x7f91a8, roughness:0.6, metalness:0.2 }));
-      top.position.set(cx3, ey + th + 1.6 + 1.5, cz3); scene.add(top);
-      for (const s of [-0.26, 0.26]) {                                          // 로드포트(FOUP) 앞면 큐브 2개
-        const lp = new THREE.Mesh(new THREE.BoxGeometry(Math.max(t.w*S*0.16, 2), 2.6, 2.2),
-          new THREE.MeshStandardMaterial({ color:0x6b83a0, roughness:0.45, metalness:0.15 }));
-        lp.position.set(cx3 + t.w*S*s, ey + 2.9, cz3 - t.h*S*0.5 - 1.1);
-        scene.add(lp);
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ServiceRobot AI | 디지털 트윈</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/static/twin.css" />
+    <script src="/static/vendor/lucide.min.js" defer></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/static/vendor/three/build/three.module.js",
+          "three/addons/": "/static/vendor/three/examples/jsm/"
+        }
       }
-    });
-    // AGV 주행 레인(바닥 페인트 라인) + 중앙 가이드라인
-    fl.tracks.forEach(([ax,ay,bx,by]) => {
-      const x1=wx(ax), z1=wz(ay,fl.y0), x2=wx(bx), z2=wz(by,fl.y0);
-      const len=Math.hypot(x2-x1, z2-z1); if (len < 0.5) return;
-      const lane = new THREE.Mesh(new THREE.BoxGeometry(len, 0.3, 2.6),
-        new THREE.MeshStandardMaterial({ color:0xb8c7d9, roughness:0.85, emissive:0x5f7ea8, emissiveIntensity:0.12 }));
-      lane.position.set((x1+x2)/2, ey+0.8, (z1+z2)/2);
-      lane.rotation.y = -Math.atan2(z2-z1, x2-x1);
-      scene.add(lane);
-      const g = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(x1, ey+1.0, z1), new THREE.Vector3(x2, ey+1.0, z2)]);
-      scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color:0x64748b })));
-    });
-    // OHT 오버헤드 레일(천장 반송)
-    (fl.oht || []).forEach(([ax, ay, bx, by]) => {
-      const oy = ey + 11;
-      const g = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(wx(ax), oy, wz(ay, fl.y0)),
-        new THREE.Vector3(wx(bx), oy, wz(by, fl.y0))]);
-      scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color:0x4a6098 })));
-    });
-    // floor label
-    scene.add(makeLabel(`${fl.short} · ${fl.name.split('·').pop().trim()}`,
-      ((x0)-CX)*S - 6, ey + 14, ((zA+zC)/2 - fl.y0 - CZ_OFF)*S));
-  });
-
-  // ===== 스토커 타워 + 층간 리프트 (전 층 관통 구조물) =====
-  const yBot = floorY(2) - 3, yTop = floorY(0) + 16, TH = yTop - yBot, ymid = (yBot + yTop) / 2;
-  function pillar(cx, cz, w, d, color, op, label) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, TH, d),
-      new THREE.MeshStandardMaterial({ color, transparent: true, opacity: op, roughness: 0.75 }));
-    m.position.set(cx, ymid, cz); scene.add(m);
-    const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),
-      new THREE.LineBasicMaterial({ color: 0x5a6ea8 }));
-    e.position.copy(m.position); scene.add(e);
-    if (label) scene.add(makeLabel(label, cx - 3.5, yTop + 5, cz));
-    return m;
-  }
-  if (LAYOUT.stocker) {
-    const S2 = LAYOUT.stocker, cx = wx(S2.x + S2.w / 2);
-    pillar(cx, 0, 9, 26, 0x2a3557, 0.92, '스토커');
-    for (let k = 1; k < 6; k++) {           // 선반 층 라인
-      const yy = yBot + TH * k / 6;
-      const g = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(cx - 4.5, yy, -13), new THREE.Vector3(cx - 4.5, yy, 13)]);
-      scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x46587f })));
-    }
-  }
-  if (LAYOUT.lift) {
-    const lx = wx(LAYOUT.lift.x + LAYOUT.lift.w / 2);
-    pillar(lx, 0, 5, 20, 0x24304e, 0.5, '층간 리프트');
-    L.floors.forEach((fl, fi) => {          // 층별 리프트 캐빈
-      const cab = new THREE.Mesh(new THREE.BoxGeometry(4, 5, 8),
-        new THREE.MeshStandardMaterial({ color: 0x3f7fb0, emissive: 0x143a52, emissiveIntensity: 0.6 }));
-      cab.position.set(lx, floorY(fi) + 5, 0); scene.add(cab);
-    });
-  }
-}
-
-function makeLabel(text, x, y, z) {
-  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
-  const g = c.getContext('2d');
-  g.fillStyle = 'rgba(15,22,42,.85)'; g.fillRect(0,0,256,64);
-  g.fillStyle = '#cdd9f5'; g.font = 'bold 26px Malgun Gothic, sans-serif';
-  g.textBaseline = 'middle'; g.fillText(text, 12, 34);
-  const tex = new THREE.CanvasTexture(c);
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true }));
-  sp.scale.set(38, 9.5, 1); sp.position.set(x, y, z);
-  return sp;
-}
-
-// 실제 팹 AGV(무인반송차) 형상: 하부 대차 + 바퀴 4 + 상단 FOUP 포드 + 상태 경광등(안돈)
-function agvFor(a) {
-  if (agvMesh[a.id]) return agvMesh[a.id];
-  const grp = new THREE.Group();
-  const steel = new THREE.MeshStandardMaterial({ color:0xc3ccdf, roughness:0.5, metalness:0.35 });
-  const dark  = new THREE.MeshStandardMaterial({ color:0x252d45, roughness:0.75, metalness:0.2 });
-  const skirt = new THREE.Mesh(new THREE.BoxGeometry(7.6, 1.6, 10.6), dark);   // 하부 대차
-  skirt.position.y = 1.0; grp.add(skirt);
-  const chassis = new THREE.Mesh(new THREE.BoxGeometry(7.0, 2.6, 9.8), steel); // 본체 섀시
-  chassis.position.y = 3.0; grp.add(chassis);
-  const wheelGeo = new THREE.CylinderGeometry(1.1, 1.1, 0.9, 14);              // 바퀴 4개
-  const wheelMat = new THREE.MeshStandardMaterial({ color:0x0e121c, roughness:0.9 });
-  for (const sx of [-3.5, 3.5]) for (const sz of [-3.2, 3.2]) {
-    const w = new THREE.Mesh(wheelGeo, wheelMat);
-    w.rotation.z = Math.PI/2; w.position.set(sx, 1.05, sz); grp.add(w);
-  }
-  const foup = new THREE.Mesh(new THREE.BoxGeometry(5.6, 4.4, 5.6),           // 상단 반송 FOUP 포드
-    new THREE.MeshStandardMaterial({ color:0x9fb3d6, roughness:0.3, metalness:0.15, transparent:true, opacity:0.92 }));
-  foup.position.y = 6.6; grp.add(foup);
-  const lid = new THREE.Mesh(new THREE.BoxGeometry(5.8, 0.8, 5.8), dark);      // 포드 상단 커버
-  lid.position.y = 9.2; grp.add(lid);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.9, 0.7),           // 전방 진행등(+Z가 앞)
-    new THREE.MeshStandardMaterial({ color:0x22c55e, emissive:0x22c55e, emissiveIntensity:0.5 }));
-  head.position.set(0, 3.2, 5.0); grp.add(head);
-  const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 2.6, 14),  // 상단 상태 경광등(안돈)
-    new THREE.MeshStandardMaterial({ color:0x22c55e, emissive:0x22c55e, emissiveIntensity:0.7, transparent:true, opacity:0.95 }));
-  beacon.position.y = 10.8; grp.add(beacon);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(6.8, 0.7, 8, 30),       // 바닥 경고 헤일로
-    new THREE.MeshBasicMaterial({ color:0xff3b3b, transparent:true, opacity:0.9 }));
-  ring.rotation.x = Math.PI/2; ring.position.y = 0.5; ring.visible = false; grp.add(ring);
-  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 70, 8),    // 층 관통 경고 빔
-    new THREE.MeshBasicMaterial({ color:0xff5a5a, transparent:true, opacity:0.24 }));
-  beam.position.y = 36; beam.visible = false; grp.add(beam);
-  grp.userData = { agv:true, id:a.id };
-  agvGroup.add(grp);
-  const rec = { mesh:grp, beacon, head, foup, ring, beam, target:{x:0,y:0,z:0,ang:0} };
-  agvMesh[a.id] = rec; return rec;
-}
-
-function applyState(st) {
-  const ds = st.data_source || {};
-  const src = document.getElementById('sourceStat');
-  const sourceText = ds.edge_active
-    ? `외부 Edge 입력 ${ds.edge_active}대 반영 중`
-    : 'AI-Hub telemetry replay 기반';
-  src.textContent = `${sourceText} · 9-class LightGBM 실시간 진단 · PHM/RUL은 규칙 기반`;
-  document.getElementById('kTotal').textContent = st.kpi.total;
-  document.getElementById('kOk').textContent = st.kpi.ok;
-  document.getElementById('kWarn').textContent = st.kpi.warn;
-  document.getElementById('kMaint').textContent = st.kpi.maint_due ?? 0;   // B4: 정비 필요 대수
-  // B2: 악화 추세(드리프트) — 아직 정상이어도 나빠지는 중인 설비 조기 경고
-  const det = st.kpi.deteriorating || 0;
-  const dEl = document.getElementById('deteriorating');
-  dEl.textContent = det ? `· 📉 악화 추세 ${det}대` : '';
-  dEl.style.color = det ? '#fb923c' : '';
-  // alerts
-  const al = document.getElementById('alertList');
-  al.innerHTML = st.alerts.length ? st.alerts.slice().sort((x, y) => y.conf - x.conf).map(a =>
-    `<div class="alert"><span class="id">${a.id}</span>`
-    + `<span class="lv lv-${a.level}">${a.level || ''}</span><span>${a.label}</span>`
-    + `<span class="cf">${(a.conf*100).toFixed(0)}%</span></div>`).join('')
-    : '<div class="alert"><span class="cf">이상 없음 ✓</span></div>';
-  // agvs
-  const seen = new Set();
-  st.agvs.forEach(a => {
-    seen.add(a.id);
-    const rec = agvFor(a);
-    const y0 = FLOOR_Y0[a.floor] ?? 0;
-    rec.target = { x: wx(a.x), y: floorY(a.floor) + 1.3, z: wz(a.y, y0), ang: a.ang };
-    rec.data = a;
-    const stage = phmStage(a);
-    const hex = stage.level ? (LVLCOL[stage.level] ?? 0xef4444) : 0x22c55e;    // 정상=초록, PHM 예측=노랑/주황, 현재 이상=경고색
-    // 섀시는 항상 금속 회색(실제 로봇) — 상태색은 경광등·진행등·(원거리 식별용) FOUP 틴트에
-    rec.beacon.material.color.setHex(hex);
-    rec.beacon.material.emissive.setHex(hex);
-    rec.beacon.material.emissiveIntensity = stage.level ? 0.85 : 0.55;
-    rec.head.material.color.setHex(hex);
-    rec.head.material.emissive.setHex(hex);
-    rec.foup.material.color.setHex(stage.level ? hex : 0x9fb3d6);
-    rec.foup.material.emissive.setHex(stage.level ? hex : 0x000000);
-    rec.foup.material.emissiveIntensity = stage.current ? 0.28 : stage.level ? 0.12 : 0;
-    // 링·빔은 현재 이상 중 경고·위험만. PHM 예측 이상은 노랑/주황 점등으로 구분한다.
-    const severe = stage.current && (a.level === '경고' || a.level === '위험');
-    rec.ring.visible = severe; rec.beam.visible = severe;
-    rec.ring.material.color.setHex(hex); rec.beam.material.color.setHex(hex);
-  });
-  // 최우선 경고(최고 신뢰도) 추적 → 자동 포커스 버튼
-  worst = st.alerts.slice().sort((x, y) => y.conf - x.conf)[0] || null;
-  const fb = document.getElementById('focusBtn');
-  fb.disabled = !worst;
-  fb.textContent = worst ? `🎯 최우선 경고 ${worst.id} (${(worst.conf*100).toFixed(0)}%)` : '🎯 경고 없음 · 전체 정상';
-  if (worst && worst.id !== lastAutoFocusId && agvMesh[worst.id]) {
-    focus = agvMesh[worst.id];
-    homing = false;
-    lastAutoFocusId = worst.id;
-  } else if (!worst) {
-    lastAutoFocusId = null;
-  }
-  // selected panel live update (최신 스냅샷 반영 후 갱신 → 센서 버퍼가 현재값 누적)
-  lastById = Object.fromEntries(st.agvs.map(a => [a.id, a]));
-  if (selected && lastById[selected]) showSel(lastById[selected]);
-}
-
-let lastById = {}, selected = null, worst = null, focus = null, homing = false;
-let lastAutoFocusId = null;
-document.getElementById('selClose').onclick = () => {
-  selected = null;
-  sensId = null;
-  document.getElementById('sel').style.display = 'none';
-};
-document.getElementById('focusBtn').onclick = () => {
-  if (worst && agvMesh[worst.id]) { focus = agvMesh[worst.id]; homing = false; }
-};
-
-// 풀스크린 토글(전시 태블릿: 브라우저 크롬 숨김)
-const fsBtn = document.getElementById('fsBtn');
-fsBtn.onclick = () => {
-  if (document.fullscreenElement) document.exitFullscreen();
-  else document.documentElement.requestFullscreen?.();
-};
-document.addEventListener('fullscreenchange', () => {
-  const on = !!document.fullscreenElement;
-  document.body.classList.toggle('fs', on);
-  fsBtn.textContent = on ? '⤢' : '⛶';
-});
-
-const SBUF_MAX = 48;                     // 스파크라인 표시 표본 수(≈5초 창)
-let sbuf = { vib: [], batt: [], temp: [] }, sensId = null;
-
-function drawSpark(id, arr, color, lo, hi) {
-  const c = document.getElementById(id), g = c.getContext('2d');
-  const W = c.width, H = c.height; g.clearRect(0, 0, W, H);
-  if (arr.length < 2) return;
-  const n = arr.length, span = Math.max(hi - lo, 1e-6);
-  const yOf = v => H - ((Math.max(lo, Math.min(hi, v)) - lo) / span) * (H - 6) - 3;
-  g.beginPath();
-  arr.forEach((v, k) => { const x = k / (n - 1) * W, y = yOf(v); k ? g.lineTo(x, y) : g.moveTo(x, y); });
-  g.lineTo(W, H); g.lineTo(0, H); g.closePath();
-  g.globalAlpha = 0.13; g.fillStyle = color; g.fill(); g.globalAlpha = 1;
-  g.beginPath();
-  arr.forEach((v, k) => { const x = k / (n - 1) * W, y = yOf(v); k ? g.lineTo(x, y) : g.moveTo(x, y); });
-  g.lineWidth = 1.7; g.strokeStyle = color; g.stroke();
-}
-
-function showSel(a) {
-  if (a.id !== sensId) { sbuf = { vib: [], batt: [], temp: [] }; sensId = a.id; }  // 선택 바뀌면 버퍼 리셋
-  selected = a.id;
-  const el = document.getElementById('sel'); el.style.display = 'block';
-  document.getElementById('selId').textContent = a.id;
-  const b = document.getElementById('selPred');
-  b.textContent = a.label; b.style.background = a.status==='warn' ? '#5a1d1d' : '#1d4a2c';
-  b.style.color = a.status==='warn' ? '#ffd0d0' : '#bff0cf';
-  document.getElementById('selConf').textContent = (a.conf*100).toFixed(1) + '%';
-  document.getElementById('selFloor').textContent = ['2F','1F','B1'][a.floor] ?? a.floor;
-  document.getElementById('selStatus').textContent = a.status==='warn' ? '이상 감지' : '정상';
-  const stage = phmStage(a);
-  const phmData = a.phm || {};
-  const phm = document.getElementById('selPhm');
-  phm.textContent = phmData.action ? `${stage.text} · ${phmData.action}` : stage.text;
-  phm.style.background = stage.level === '위험' ? '#5a1d1d'
-    : stage.level === '경고' ? '#5a3512'
-    : stage.level === '주의' ? '#554a16'
-    : '#1d4a2c';
-  phm.style.color = stage.level === '위험' ? '#ffd0d0'
-    : stage.level === '경고' ? '#ffd7a3'
-    : stage.level === '주의' ? '#fff2a3'
-    : '#bff0cf';
-  document.getElementById('selPhmRisk').textContent =
-    phmData.risk_score != null ? `${phmData.risk_score} / 100 · ${phmData.severity}` : '–';
-  document.getElementById('selRul').textContent =
-    phmData.rul_estimate_min === 0 ? '즉시'
-    : phmData.rul_estimate_min ? `${phmData.rul_estimate_min}분 이내 점검 권장`
-    : '정상 범위';
-  const dispatch = a.dispatch || {};
-  const stateText = {
-    dispatch_now: '즉시 대응',
-    schedule_inspection: '점검 예약',
-    watch: '추세 감시',
-    normal: '정상 순찰'
-  }[dispatch.state] || '정상 순찰';
-  document.getElementById('selDispatchState').textContent = stateText;
-  const impact = dispatch.impact_pct ?? 0;
-  document.getElementById('selImpactText').textContent = `${impact}% · ${dispatch.route_block_risk ? '동선 영향 있음' : '동선 정상'}`;
-  const ib = document.getElementById('selImpactBar');
-  ib.style.width = `${impact}%`;
-  ib.style.background = impact >= 45 ? '#ef4444' : impact >= 25 ? '#fb923c' : impact >= 10 ? '#facc15' : '#22c55e';
-  document.getElementById('selPriority').textContent =
-    dispatch.priority === 'NORMAL' ? '정상' : `${dispatch.priority} · ${dispatch.sla_min}분`;
-  document.getElementById('selZone').textContent = dispatch.affected_zone || '–';
-  document.getElementById('selWorkOrder').textContent =
-    dispatch.work_order_required ? dispatch.work_order_id : dispatch.operator_action || '정상 순찰 유지';
-  const edge = document.getElementById('selEdge');
-  const edgeActive = a.edge_input && a.edge_input.active;
-  edge.textContent = edgeActive ? `수신됨 · ${a.edge_input.age_sec}s` : '내부 replay';
-  edge.style.background = edgeActive ? '#183b5b' : '#1d4a2c';
-  edge.style.color = edgeActive ? '#b9dcff' : '#bff0cf';
-  document.getElementById('selSource').textContent =
-    edgeActive ? '외부 MQTT/edge payload' : 'AI-Hub replay + live Booster';
-  // B4: 자산 건전도(Health Index) + 정비 트리아지 권고
-  const h = a.health ?? 100;
-  document.getElementById('selHealth').textContent = h + ' / 100';
-  const hb = document.getElementById('selHealthBar');
-  hb.style.width = h + '%';
-  hb.style.background = h >= 80 ? '#22c55e' : h >= 55 ? '#facc15' : h >= 30 ? '#fb923c' : '#ef4444';
-  const ad = document.getElementById('selAdvice'), adWarn = h < 55;
-  ad.textContent = a.advice ?? '–';
-  ad.style.background = adWarn ? '#5a1d1d' : '#1d4a2c';
-  ad.style.color = adWarn ? '#ffd0d0' : '#bff0cf';
-  // 실시간 센서 그래프(진동·배터리·온도)
-  const s = a.sensors;
-  if (s) {
-    for (const k of ['vib', 'batt', 'temp']) { sbuf[k].push(s[k]); if (sbuf[k].length > SBUF_MAX) sbuf[k].shift(); }
-    const vibHot = s.vib > 5, battHot = s.batt < 25, tempHot = s.temp > 58;
-    const setNum = (id, val, hot) => { const e = document.getElementById(id); e.textContent = val; e.style.color = hot ? '#dc2626' : '#172033'; };
-    setNum('svVib', s.vib.toFixed(1), vibHot); setNum('svBatt', s.batt.toFixed(0), battHot); setNum('svTemp', s.temp.toFixed(0), tempHot);
-    drawSpark('cVib', sbuf.vib, vibHot ? '#ef4444' : '#22c55e', 0, 12);
-    drawSpark('cBatt', sbuf.batt, battHot ? '#ef4444' : '#38bdf8', 0, 100);
-    drawSpark('cTemp', sbuf.temp, tempHot ? '#ef4444' : '#f59e0b', 25, 75);
-  }
-  // AI 판단 근거(주요 이상 신호)
-  const cl = document.getElementById('causeList');
-  cl.innerHTML = (a.cause || ['–']).map(c => `<li>${c}</li>`).join('');
-  // 진단 추세 타임라인(최근 이력): 0 정상·1 주의·2 경고·3 위험
-  const TC = ['#22c55e', '#facc15', '#fb923c', '#ef4444'];
-  const tr = a.trend || [];
-  document.getElementById('trendRow').innerHTML =
-    tr.map(c => `<i style="background:${TC[c] || '#22c55e'}"></i>`).join('');
-  const warnN = tr.filter(c => c > 0).length;
-  const dir = a.trend_dir || '안정';                 // B2: 악화/개선/안정
-  const dmark = { '악화': '📉 악화 추세', '개선': '📈 개선', '안정': '● 안정' }[dir];
-  const dcolor = { '악화': '#ea580c', '개선': '#16a34a', '안정': '#64748b' }[dir];
-  const tn = document.getElementById('trendNow');
-  tn.innerHTML = tr.length
-    ? `<span style="color:${dcolor}">${dmark}</span> · 최근 ${tr.length}틱 중 이상 ${warnN}` : '';
-  pollHist(a.id);   // 적재된 이벤트 이력(시계열 스토어 조회, 3초 스로틀)
-}
-
-// tap to select
-const ray = new THREE.Raycaster(); const ptr = new THREE.Vector2();
-function pick(cx, cy) {
-  ptr.x = (cx/innerWidth)*2 - 1; ptr.y = -(cy/innerHeight)*2 + 1;
-  ray.setFromCamera(ptr, camera);
-  const hit = ray.intersectObjects(agvGroup.children, true)[0];
-  if (hit) {
-    let g = hit.object; while (g && !g.userData?.agv) g = g.parent;
-    if (g && lastById[g.userData.id]) {
-      showSel(lastById[g.userData.id]);
-      focus = agvMesh[g.userData.id];
-      homing = false;
-    }
-  }
-}
-let downXY = null, lastTapT = 0;
-renderer.domElement.addEventListener('pointerdown', e => downXY = [e.clientX, e.clientY]);
-renderer.domElement.addEventListener('pointerup', e => {
-  const tap = downXY && Math.hypot(e.clientX-downXY[0], e.clientY-downXY[1]) < 6;
-  const now = performance.now();
-  if (tap && now - lastTapT < 320) {       // 더블탭 → 홈 시점으로 부드럽게 복귀
-    focus = null; homing = true; lastTapT = 0;
-  } else {
-    if (tap) pick(e.clientX, e.clientY);
-    lastTapT = tap ? now : 0;
-  }
-  downXY = null;
-});
-
-// data: WebSocket + polling fallback
-function connect() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const ws = new WebSocket(`${proto}://${location.host}/ws`);
-  const sEl = document.getElementById('status');
-  ws.onopen = () => sEl.textContent = '● 실시간 연결됨';
-  ws.onmessage = e => applyState(JSON.parse(e.data));
-  ws.onclose = () => { sEl.textContent = '● 재연결 시도…'; setTimeout(connect, 1500); };
-  ws.onerror = () => ws.close();
-}
-// 시계열 데이터 계층: 세션 누적 이벤트 통계 폴링 → HUD 갱신(적재량·최다결함·평균건전도)
-async function pollStats() {
-  try {
-    const [s, rel] = await Promise.all([
-      (await fetch('/api/stats')).json(),
-      (await fetch('/api/reliability')).json()]);
-    const top = s.top_agv && s.top_agv[0];
-    const av = rel.availability != null ? (rel.availability * 100).toFixed(1) + '%' : '–';
-    document.getElementById('dataStat').textContent =
-      `🗄 세션 적재 ${s.total}건 · 최다결함 ${top ? top.agv + ' (' + top.events + ')' : '–'} · 평균건전도 ${s.avg_health ?? '–'} · 플릿 가용도 ${av}`;
-  } catch (e) {}
-}
-setInterval(pollStats, 3000);
-
-// 플릿 추이 차트: /api/trend 시간버킷 롤업(다운샘플링) → 경고 이벤트·평균 건전도 이중 라인
-async function pollTrend() {
-  try {
-    const tr = await (await fetch('/api/trend?bucket=20&n=24')).json();   // 20초 버킷 × 24 ≈ 최근 8분
-    const c = document.getElementById('fleetChart'), g = c.getContext('2d');
-    const W = c.width, H = c.height; g.clearRect(0, 0, W, H);
-    if (tr.length < 2) { document.getElementById('ftNow').textContent = '수집 중…'; return; }
-    const warns = tr.map(b => (b.danger||0) + (b.warning||0) + (b.caution||0));
-    const wMax = Math.max(...warns, 1);
-    const xOf = k => k / (tr.length - 1) * (W - 8) + 4;
-    const line = (vals, lo, hi, color, fill) => {
-      const yOf = v => H - ((Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * (H - 10) - 5;
-      g.beginPath();
-      vals.forEach((v, k) => { const x = xOf(k), y = yOf(v); k ? g.lineTo(x, y) : g.moveTo(x, y); });
-      if (fill) { g.lineTo(W - 4, H); g.lineTo(4, H); g.closePath();
-        g.globalAlpha = 0.12; g.fillStyle = color; g.fill(); g.globalAlpha = 1; g.beginPath();
-        vals.forEach((v, k) => { const x = xOf(k), y = yOf(v); k ? g.lineTo(x, y) : g.moveTo(x, y); }); }
-      g.lineWidth = 2; g.strokeStyle = color; g.stroke();
-    };
-    line(warns, 0, wMax, '#ef4444', true);                              // 경고 이벤트/버킷
-    line(tr.map(b => b.avg_health ?? 100), 0, 100, '#22c55e', false);   // 평균 건전도
-    const last = tr[tr.length - 1];
-    document.getElementById('ftNow').textContent =
-      `경고 ${warns[warns.length - 1]} · 건전도 ${last.avg_health ?? '–'}`;
-  } catch (e) {}
-}
-setInterval(pollTrend, 5000);
-
-// 설비 이벤트 이력: 선택 AGV의 적재 이벤트를 /api/history로 조회(3초 스로틀) + CSV 반출 링크
-let histAt = 0, histFor = null;
-async function pollHist(id) {
-  const now = Date.now();
-  if (id === histFor && now - histAt < 3000) return;
-  histAt = now; histFor = id;
-  document.getElementById('histCsv').href = `/api/history?agv=${id}&fmt=csv`;
-  try {
-    // 설비 신뢰성 지표(MTBF·MTTR·가용도) — 신뢰성 공학 관점의 자산 요약
-    fetch(`/api/reliability?agv=${id}`).then(r => r.json()).then(rel => {
-      document.getElementById('relLine').textContent = rel.episodes
-        ? `가용도 ${(rel.availability * 100).toFixed(1)}% · MTBF ${rel.mtbf ?? '–'}s · MTTR ${rel.mttr}s · 고장 ${rel.episodes}회`
-        : '관측창 내 고장 없음 ✓';
-    }).catch(() => {});
-    const rows = await (await fetch(`/api/history?agv=${id}&limit=6`)).json();
-    const el = document.getElementById('histList');
-    if (!rows.length) { el.innerHTML = '<div class="hrow"><span class="tm">적재된 이상 이벤트 없음 ✓</span></div>'; return; }
-    el.innerHTML = rows.map(r => {
-      const t = new Date(r.ts * 1000).toTimeString().slice(0, 8);
-      const KOR = { 'E-ENV-C':'교차로 충돌위험','E-ENV-O':'경로 장애물','E-INF-A':'도어 연동','E-INF-E':'리프트 연동',
-                    'E-RBT-B':'배터리 저하','E-RBT-E':'긴급정지','E-RBT-N':'통신 끊김','E-RBT-S':'센서 이상' };
-      return `<div class="hrow"><span class="tm">${t}</span><span>${KOR[r.pred] ?? r.pred}</span>`
-        + `<span class="lv lv-${r.level}">${r.level ?? ''}</span><span class="hh">${r.health}</span></div>`;
-    }).join('');
-  } catch (e) {}
-}
-
-async function bootstrap() {
-  try {
-    const L = await (await fetch('/api/layout')).json(); buildLayout(L);
-    const s = await (await fetch('/api/snapshot')).json(); applyState(s);
-    document.getElementById('offline').style.display = 'none';
-    connect(); pollStats(); pollTrend();
-  } catch (err) {
-    document.getElementById('status').textContent = '● 서버 미연결';
-    document.getElementById('offline').style.display = 'flex';   // 서버 없이 열면 안내 표시
-  }
-}
-
-addEventListener('resize', () => {
-  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-});
-
-const clk = new THREE.Clock();
-let T = 0;
-function animate() {
-  requestAnimationFrame(animate);
-  const dt = clk.getDelta(); T += dt;
-  const k = Math.min(1, dt * 8);                 // 보간 속도
-  const pulse = 0.5 + 0.5 * Math.sin(T * 6);     // 경고 맥동(0~1)
-  for (const id in agvMesh) {
-    const r = agvMesh[id], t = r.target, p = r.mesh.position;
-    p.x += (t.x - p.x) * k; p.y += (t.y - p.y) * k; p.z += (t.z - p.z) * k;
-    r.mesh.rotation.y = -t.ang * Math.PI/180;
-    if (r.ring.visible) {                          // 이상 설비 하이라이트 맥동(경광등 점멸)
-      r.ring.scale.setScalar(1 + pulse * 0.5);
-      r.ring.material.opacity = 0.35 + pulse * 0.6;
-      r.beacon.material.emissiveIntensity = 0.6 + pulse * 0.9;
-    }
-  }
-  if (focus) {                                     // 최우선 경고로 카메라 자동 이동
-    const fp = focus.mesh.position;
-    controls.target.lerp(fp, 0.06);
-    const want = new THREE.Vector3(fp.x + 42, fp.y + 58, fp.z + 72);
-    camera.position.lerp(want, 0.06);
-    if (camera.position.distanceTo(want) < 3) focus = null;
-  } else if (homing) {                             // 더블탭 → 홈 시점 복귀
-    controls.target.lerp(HOME_TGT, 0.08);
-    camera.position.lerp(HOME_POS, 0.08);
-    if (camera.position.distanceTo(HOME_POS) < 2) homing = false;
-  }
-  controls.autoRotate = !focus && !homing && !selected;
-  controls.update();
-  renderer.render(scene, camera);
-}
-bootstrap(); animate();
-</script>
-</body>
+    </script>
+    <script type="module" src="/static/twin.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/twin"
+        ><span class="brand-icon"><i data-lucide="boxes"></i></span
+        ><span
+          >ServiceRobot <b>AI</b><small>FLEET OPERATIONS / FAB 01</small></span
+        ></a
+      >
+      <nav aria-label="주요 화면">
+        <button class="nav-tab active" data-view="twin" aria-pressed="true">
+          <i data-lucide="box"></i>디지털 트윈
+        </button>
+        <button class="nav-tab" data-view="orders" aria-pressed="false">
+          <i data-lucide="clipboard-list"></i>정비 작업<span
+            id="orderCount"
+            class="count"
+            >0</span
+          >
+        </button>
+        <button class="nav-tab" data-view="evidence" aria-pressed="false">
+          <i data-lucide="scan-line"></i>데이터 · AI
+        </button>
+      </nav>
+      <div class="connection">
+        <span class="dot" id="connectionDot"></span
+        ><span id="connectionText">연결 중</span
+        ><time id="clock">--:--:--</time>
+      </div>
+    </header>
+    <section class="summary-band" aria-label="플릿 현황">
+      <div class="summary-title">
+        <span class="eyebrow">OPERATIONS OVERVIEW</span>
+        <h1>플릿 운영 현황</h1>
+      </div>
+      <div class="metric">
+        <span>전체 자산</span><strong id="total">--</strong><small>AGV</small>
+      </div>
+      <div class="metric">
+        <span><i class="dot normal"></i>정상</span
+        ><strong id="normal">--</strong><small>안정 운전</small>
+      </div>
+      <div class="metric">
+        <span><i class="dot watch"></i>주의 · 예측</span
+        ><strong id="predicted">--</strong><small>예방 점검</small>
+      </div>
+      <div class="metric">
+        <span><i class="dot fault"></i>현재 이상</span
+        ><strong id="faults">--</strong><small>원인 확인</small>
+      </div>
+      <div class="metric">
+        <span>평균 건전도</span><strong id="health">--</strong
+        ><small>/ 100</small>
+      </div>
+    </section>
+    <main class="workspace">
+      <aside class="asset-rail">
+        <div class="section-title">
+          <h2>자산 목록</h2>
+          <span id="assetCount">--</span>
+        </div>
+        <label class="search"
+          ><i data-lucide="search"></i
+          ><input
+            id="assetSearch"
+            type="search"
+            placeholder="AGV 검색"
+            aria-label="AGV 검색"
+        /></label>
+        <div class="rail-filters">
+          <select id="floorFilter" aria-label="층 필터">
+            <option value="all">전체 층</option>
+            <option value="0">2F 공정</option>
+            <option value="1">1F 이송</option>
+            <option value="2">B1 유틸리티</option></select
+          ><select id="stateFilter" aria-label="상태 필터">
+            <option value="all">전체 상태</option>
+            <option value="attention">점검 대상</option>
+            <option value="normal">정상</option>
+          </select>
+        </div>
+        <div id="assetList" class="asset-list">
+          <p class="empty">자산을 불러오는 중</p>
+        </div>
+        <div class="rail-bottom">
+          <i data-lucide="database"></i
+          ><span id="storageStatus">이벤트 수집 대기</span
+          ><a href="/" title="2D 관제 열기" aria-label="2D 관제 열기"
+            ><i data-lucide="external-link"></i
+          ></a>
+        </div>
+      </aside>
+      <section id="twinView" class="scene-column" aria-label="3D 디지털 트윈">
+        <div class="scene-toolbar">
+          <div>
+            <span class="eyebrow">LIVE DIGITAL TWIN</span>
+            <h2>FAB 01 <span>/ 다층 이송 라인</span></h2>
+          </div>
+          <div class="tools">
+            <button
+              class="icon-button"
+              id="homeBtn"
+              title="전체 시점"
+              aria-label="전체 시점"
+            >
+              <i data-lucide="scan"></i>
+            </button>
+            <button
+              class="icon-button active"
+              id="orbitBtn"
+              title="순찰 회전"
+              aria-label="순찰 회전"
+              aria-pressed="true"
+            >
+              <i data-lucide="rotate-3d"></i>
+            </button>
+            <button
+              class="icon-button"
+              id="focusBtn"
+              title="최우선 자산"
+              aria-label="최우선 자산"
+            >
+              <i data-lucide="crosshair"></i>
+            </button>
+            <button
+              class="icon-button"
+              id="fullscreenBtn"
+              title="전체 화면"
+              aria-label="전체 화면"
+            >
+              <i data-lucide="maximize"></i>
+            </button>
+          </div>
+        </div>
+        <div id="viewport">
+          <div id="app"></div>
+          <div class="scene-badges">
+            <span class="source-badge" id="streamSource"
+              >REPLAY + LIVE MODEL</span
+            ><span id="motionState">0.5× 재생</span>
+          </div>
+          <div id="sceneError" class="scene-error" hidden>
+            <strong>3D 화면을 연결할 수 없습니다.</strong
+            ><span id="sceneErrorText"></span
+            ><button id="retryBtn">다시 연결</button>
+          </div>
+          <div class="scene-legend">
+            <span><i class="dot normal"></i>정상</span
+            ><span><i class="dot watch"></i>주의</span
+            ><span><i class="dot predicted"></i>예측 이상</span
+            ><span><i class="dot fault"></i>현재 이상</span>
+          </div>
+        </div>
+        <div class="playback">
+          <div class="playback-label">
+            <i data-lucide="radio-tower"></i><b>시뮬레이션</b
+            ><span id="scenarioCount">수동 시나리오 0대</span>
+          </div>
+          <div class="tools">
+            <button
+              id="pauseBtn"
+              class="icon-button"
+              title="주행 일시정지"
+              aria-label="주행 일시정지"
+            >
+              <i data-lucide="pause"></i></button
+            ><select id="speedSelect" aria-label="주행 속도">
+              <option value="0.25">0.25×</option>
+              <option value="0.5" selected>0.5×</option>
+              <option value="1">1×</option>
+            </select>
+          </div>
+        </div>
+        <div class="pipeline" aria-label="실시간 처리 흐름">
+          <span><i class="dot normal"></i>입력 수신</span
+          ><i data-lucide="chevron-right"></i><span>LightGBM 진단</span
+          ><i data-lucide="chevron-right"></i><span>PHM 규칙 평가</span
+          ><i data-lucide="chevron-right"></i><span>정비 작업</span
+          ><b id="latency">-- ms</b>
+        </div>
+      </section>
+      <aside id="inspector" class="inspector">
+        <div id="selectionEmpty" class="selection-empty">
+          <i data-lucide="mouse-pointer-2"></i>
+          <h2>자산 상세</h2>
+          <p>선택된 자산 없음</p>
+          <div class="overview-note">
+            PHM / 규칙 기반 추정<br />물리 로봇 미연결
+          </div>
+        </div>
+        <div id="selection" hidden>
+          <div class="inspector-heading">
+            <div>
+              <span class="eyebrow" id="selectedZone">ASSET DETAILS</span>
+              <h2 id="selectedId">AGV</h2>
+            </div>
+            <button
+              id="closeSelection"
+              class="icon-button"
+              title="선택 해제"
+              aria-label="선택 해제"
+            >
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+          <div class="inspector-scroll">
+            <section class="diagnosis-block">
+              <div class="status-line">
+                <span id="stageBadge" class="stage normal">정상</span
+                ><span id="diagnosisSource" class="muted"></span>
+              </div>
+              <h3 id="diagnosis">--</h3>
+              <p id="action">--</p>
+              <div class="health-line">
+                <span>건전도 <b id="selectedHealth">--</b></span
+                ><span>위험도 <b id="risk">--</b></span>
+              </div>
+              <div class="health-track"><i id="healthBar"></i></div>
+              <div class="detail-row">
+                <span id="confidenceLabel">모델 신뢰도</span
+                ><b id="confidence">--</b>
+              </div>
+              <div class="detail-row">
+                <span>점검 권장 시점</span><b id="rul">--</b>
+              </div>
+              <p class="footnote">PHM 규칙 기반 권고 · 검증된 잔여수명 아님</p>
+            </section>
+            <section>
+              <div class="section-title">
+                <h3>센서 추이</h3>
+                <span id="sensorSource" class="muted">합성 입력</span>
+              </div>
+              <div class="sensor">
+                <div>
+                  <span>배터리</span><b id="battValue">--</b><small>%</small>
+                </div>
+                <canvas id="battChart" width="300" height="48"></canvas>
+              </div>
+              <div class="sensor">
+                <div>
+                  <span>진동</span><b id="vibValue">--</b><small>mm/s</small>
+                </div>
+                <canvas id="vibChart" width="300" height="48"></canvas>
+              </div>
+              <div class="sensor">
+                <div>
+                  <span>온도</span><b id="tempValue">--</b><small>°C</small>
+                </div>
+                <canvas id="tempChart" width="300" height="48"></canvas>
+              </div>
+            </section>
+            <section>
+              <h3>점검 근거</h3>
+              <ul id="reasons" class="reasons"></ul>
+              <p class="footnote">
+                진단 코드별 점검 항목 · 모델 기여도 분석 아님
+              </p>
+            </section>
+            <section>
+              <div class="section-title">
+                <h3>정비 대응</h3>
+                <span id="priority" class="stage">--</span>
+              </div>
+              <p id="dispatchAction">--</p>
+              <div id="assetOrders"></div>
+              <button id="openOrdersBtn" class="text-button">
+                <i data-lucide="clipboard-list"></i>정비 작업 전체 보기
+              </button>
+            </section>
+            <section>
+              <h3>시연 상태</h3>
+              <label class="scenario-label" for="scenarioSelect"
+                >선택 자산 · 서버 세션 공유</label
+              >
+              <div class="scenario-controls">
+                <select id="scenarioSelect">
+                  <option value="replay">모델 리플레이</option>
+                  <option value="normal">정상 운전</option>
+                  <option value="watch">주의 · 열화 징후</option>
+                  <option value="degrading">예측 이상 · 점검 필요</option>
+                  <option value="battery">현재 이상 · 배터리</option>
+                  <option value="network">현재 이상 · 통신</option></select
+                ><button id="applyScenario" class="primary">적용</button>
+              </div>
+              <p class="footnote" id="scenarioNotice">
+                수동 시나리오 · AI 예측 성능 평가에서 제외
+              </p>
+            </section>
+            <section>
+              <div class="section-title">
+                <h3>이벤트 이력</h3>
+                <a
+                  id="csvExport"
+                  href="#"
+                  title="CSV 내보내기"
+                  aria-label="CSV 내보내기"
+                  ><i data-lucide="download"></i
+                ></a>
+              </div>
+              <div id="historyList" class="history-list">수집 중</div>
+            </section>
+          </div>
+        </div>
+      </aside>
+      <section id="ordersView" class="data-view" hidden>
+        <div class="view-heading">
+          <div>
+            <span class="eyebrow">MAINTENANCE</span>
+            <h2>정비 작업</h2>
+            <p>진단과 예측 위험도에 따른 점검 큐</p>
+          </div>
+          <select id="orderFilter" aria-label="작업 상태 필터">
+            <option value="active">진행 중인 작업</option>
+            <option value="all">전체 이력</option>
+            <option value="resolved">완료</option>
+          </select>
+        </div>
+        <div id="ordersTable" class="table-wrap"></div>
+        <a
+          class="text-button report-link"
+          href="/api/shift-handover?fmt=md"
+          download="shift-handover.md"
+          ><i data-lucide="download"></i>인수인계 리포트</a
+        >
+      </section>
+      <section id="evidenceView" class="data-view" hidden>
+        <div class="view-heading">
+          <div>
+            <span class="eyebrow">DATA & MODEL</span>
+            <h2>데이터와 AI 검증</h2>
+            <p>입력 출처, 진단 모델, 예측 한계</p>
+          </div>
+          <a
+            href="/api/model-card"
+            target="_blank"
+            rel="noopener"
+            class="text-button"
+            ><i data-lucide="file-json"></i>모델 카드</a
+          >
+        </div>
+        <div id="evidenceContent"></div>
+      </section>
+    </main>
+    <footer class="statusbar">
+      <span id="sourceLine">데이터 출처 확인 중</span
+      ><span
+        >PHM: HEURISTIC <span class="separator">/</span>
+        <span id="freshness">갱신 대기</span></span
+      >
+    </footer>
+    <div id="toast" role="status" hidden></div>
+  </body>
 </html>

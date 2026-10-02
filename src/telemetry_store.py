@@ -30,6 +30,7 @@ _DDL = """CREATE TABLE IF NOT EXISTS events(
 _EXTRA_COLUMNS = {
     "risk_score": "REAL",
     "trend_slope": "REAL",
+    "source": "TEXT DEFAULT 'legacy'",
 }
 
 
@@ -65,11 +66,13 @@ class TelemetryStore:
                 rows.append((ts, a["id"], a["floor"], a["pred"], a["conf"],
                              a.get("level"), a.get("health", 100),
                              s.get("vib"), s.get("batt"), s.get("temp"),
-                             phm.get("risk_score"), phm.get("trend_slope")))
+                             phm.get("risk_score"), phm.get("trend_slope"), a.get("source", "legacy")))
         if not rows:
             return 0
         with self.lock:
-            self.cx.executemany("INSERT INTO events VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            self.cx.executemany("INSERT INTO events "
+                                "(ts,agv,floor,pred,conf,level,health,vib,batt,temp,risk_score,trend_slope,source) "
+                                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
             self.cx.commit()
         return len(rows)
 
@@ -86,7 +89,7 @@ class TelemetryStore:
         """설비 1대의 최근 진단 이벤트 이력(최신순)."""
         with self.lock:
             cur = self.cx.execute(
-                "SELECT ts,pred,conf,level,health,vib,batt,temp,risk_score,trend_slope FROM events "
+                "SELECT ts,pred,conf,level,health,vib,batt,temp,risk_score,trend_slope,source FROM events "
                 "WHERE agv=? ORDER BY ts DESC LIMIT ?", (agv, limit))
             cols = [c[0] for c in cur.description]
             return [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -95,7 +98,7 @@ class TelemetryStore:
         """외부 TSDB export용 최근 이벤트 목록(최신순)."""
         with self.lock:
             cur = self.cx.execute(
-                "SELECT ts,agv,floor,pred,conf,level,health,vib,batt,temp,risk_score,trend_slope FROM events "
+                "SELECT ts,agv,floor,pred,conf,level,health,vib,batt,temp,risk_score,trend_slope,source FROM events "
                 "WHERE ts>=? ORDER BY ts DESC LIMIT ?", (since, limit))
             cols = [c[0] for c in cur.description]
             return [dict(zip(cols, r)) for r in cur.fetchall()]

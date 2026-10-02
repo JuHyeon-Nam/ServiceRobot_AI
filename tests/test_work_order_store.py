@@ -80,9 +80,35 @@ def test_status_transitions_and_closed_revision():
     assert store.set_status("missing", "closed", 130.0) is None
     store.set_status("WO-AGV-01-E-RBT-B", "closed", 140.0)
     store.sync_from_snapshot(150.0, [_agv()])
-
+    store.sync_from_snapshot(150.1, [_agv()])
+    assert store.summary()["total"] == 1
+    store.sync_from_snapshot(160.0, [_agv(status="ok", pred="정상", health=100, level=None)])
+    store.sync_from_snapshot(170.0, [_agv()])
+    store.sync_from_snapshot(170.1, [_agv()])
     assert store.summary()["total"] == 2
-    assert any(o["id"] == "WO-AGV-01-E-RBT-B-150" for o in store.list(limit=10))
+    assert sum(o["status"] == "open" for o in store.list(limit=10)) == 1
+
+
+def test_predicted_fault_with_high_health_creates_order():
+    from work_order_store import WorkOrderStore
+    store = WorkOrderStore()
+    store.sync_from_snapshot(100, [_agv(status="ok", pred="정상", health=65, level=None,
+        phm={"stage": "predicted_fault", "severity": "경고"}, source="demo_scenario")])
+    order = store.list()[0]
+    assert order["priority"] == "P2"
+    assert order["source"] == "demo_scenario"
+
+
+def test_completed_signal_suppression_survives_restart(tmp_path):
+    from work_order_store import WorkOrderStore
+    path = str(tmp_path / "work.db")
+    store = WorkOrderStore(path)
+    store.sync_from_snapshot(100, [_agv()])
+    store.set_status("WO-AGV-01-E-RBT-B", "resolved", 110)
+    store.cx.close()
+    restarted = WorkOrderStore(path)
+    restarted.sync_from_snapshot(120, [_agv()])
+    assert restarted.summary()["total"] == 1
 
 
 def test_sla_overdue_summary_counts_only_open_orders():

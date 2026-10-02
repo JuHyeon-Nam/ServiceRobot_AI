@@ -13,6 +13,7 @@ import csv
 import math
 import time
 import asyncio
+from contextlib import asynccontextmanager, suppress
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -23,13 +24,14 @@ from telemetry_store import TelemetryStore
 from tsdb_export import export_payload, tsdb_contract
 from dataset_quality import RoboticsDataQualityMonitor, records_from_agv_snapshot
 from drift_monitor import DataDriftMonitor
+from demo_runtime import DemoControl, DemoRuntime
 from edge_gateway import EdgeGateway, edge_contract
 from fleet_risk import fleet_risk
 from model_card import build_model_card
 from ops_report import build_ops_report, build_shift_handover, handover_to_markdown, report_to_markdown
 from pdm_runtime import load_runtime, predict_window, synthesize_live_window
 from reviewer_brief import build_reviewer_brief
-from rul_runtime import attach_rul_model_slot, rul_calibration_contract, rul_readiness_report
+from rul_runtime import attach_rul_model_slot, load_rul_baseline_metadata, rul_calibration_contract, rul_readiness_report
 from work_order_store import WorkOrderStore, priority_for, sla_seconds_for
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -264,7 +266,18 @@ def agv_sensors(i: int, n: int, pred: str) -> dict:
         temp += 4
     return {"vib": round(vib, 2), "batt": round(max(batt, 4.0), 1), "temp": round(temp, 1)}
 
-app = FastAPI(title="FAB AMHS 실시간 관제 서버")
+@asynccontextmanager
+async def lifespan(app):
+    task = asyncio.create_task(advance_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+app = FastAPI(title="FAB AMHS 실시간 관제 서버", lifespan=lifespan)
 
 rep = pd.read_parquet(f"{DATA}/replay.parquet")
 robots = sorted(rep["robot"].unique())
@@ -278,6 +291,7 @@ for rid in robots:
 PLAN = FL.build_agv_plan(robots)
 LAYOUT = FL.build_layout()
 P = {"v": 0.0}     # 전역 진행도(0~1 순환)
+DEMO = DemoRuntime()
 REPLAY_TICK_SEC = 0.05
 REPLAY_PROGRESS_PER_TICK = max(float(os.environ.get("REPLAY_PROGRESS_PER_TICK", "0.0008")), 0.0001)
 REPLAY_CYCLE_SEC = round(REPLAY_TICK_SEC / REPLAY_PROGRESS_PER_TICK, 1)
@@ -304,7 +318,7 @@ DATA_SOURCE = {
     },
     "edge_ingest": f"POST /api/edge-ingest can override a live AGV state for {EDGE_INPUT_TTL_SEC:g} seconds",
     "streaming": "WebSocket /ws publishes each refreshed snapshot to the twin",
-    "rule_based_parts": ["3D route animation", "PHM risk/RUL heuristic"],
+    "rule_based_parts": ["3D route animation", "PHM risk/RUL heuristic", "manual demo scenarios"],
     "model_based_parts": ["9-class fault diagnosis", "prediction confidence", "live inference metadata"],
     "model_ready_contracts": ["RUL calibration contract"],
 }
@@ -365,7 +379,8 @@ def snapshot():
     for a in PLAN:
         t = TRAJ[a["robot"]]; n = t["n"]
         i = int(((p + a.get("toff", 0.0)) % 1.0) * (n - 1))    # AGV별 시점 오프셋 → 고장 분산
-        s = (t["prog"][i] + a["phase"]) % 1.0
+        # Route distance advances continuously, independent of irregular replay sampling.
+        s = (p + a["phase"]) % 1.0
         x, y, ang = a["route"].at(s)
         diag = live_diagnosis(a, t, i, x, y, ang)
         pred = diag["pred"]; warn = pred != "정상"
@@ -373,6 +388,15 @@ def snapshot():
         level = alert_level(conf) if warn else None
         edge_input = active_edge_input(a["id"], now)
         edge_payload = edge_input["payload"] if edge_input else None
+        scenario = DEMO.sample(a["id"]) if not edge_payload else None
+        source = "edge_ingest" if edge_payload else "demo_scenario" if scenario else "replay_model"
+        if edge_payload and (edge_payload.get("source") or {}).get("inference_mode") == "demo_scenario":
+            source = "demo_scenario"
+        if scenario:
+            pred = scenario["pred"]
+            conf = 1.0  # Scripted state certainty, not a model probability.
+            warn = pred != "정상"
+            level = "위험" if warn else None
         if edge_payload:
             d = edge_payload.get("diagnosis") or {}
             pos = edge_payload.get("position") or {}
@@ -387,10 +411,16 @@ def snapshot():
         lo = max(0, i - (TREND_W - 1))         # B3: 최근 N틱 진단 추세(0~3 코드)
         trend = [diag_code(t["pred"][k], round(float(t["conf"][k]), 3)) for k in range(lo, i + 1)]
         trend[-1] = diag_code(pred, conf)       # 현재 셀은 live Booster 진단과 정합
+        if scenario:
+            trend = list(scenario["trend"])
         trend_dir = trend_direction(trend)      # B2: 악화/개선/안정 방향(드리프트 조기 감지)
         health = health_index(trend, conf, warn)         # B4: 자산 건전도 지표(추세 종합)
         advice = maint_advice(health, trend_dir)         # B4: 정비 트리아지 권고
         sensors = agv_sensors(i, n, pred)
+        if scenario:
+            health = scenario["health"]
+            sensors = dict(scenario["sensors"])
+            advice = maint_advice(health, trend_dir)
         if edge_payload:
             sensors = {**sensors, **(edge_payload.get("sensors") or {})}
             h = edge_payload.get("health") or {}
@@ -408,7 +438,10 @@ def snapshot():
                 "trend": trend, "trend_dir": trend_dir, "health": health, "advice": advice,
                 "phm": phm, "dispatch": dispatch,
                 "edge_input": {"active": bool(edge_input), "age_sec": edge_input["age_sec"] if edge_input else None},
-                "inference_mode": "live_booster", "model_latency_ms": diag["latency_ms"],
+                "source": source, "scenario": scenario["name"] if scenario else None,
+                "inference_mode": "live_booster" if source == "replay_model" else source,
+                "model_diagnosis": {"pred": diag["pred"], "conf": diag["conf"]},
+                "model_latency_ms": diag["latency_ms"],
                 "replay_pred": diag["replay_pred"], "replay_conf": diag["replay_conf"]}
         agvs.append(item)
         if warn:
@@ -420,7 +453,7 @@ def snapshot():
     maint_due = sum(a["health"] < 55 for a in agvs)              # B4: 정비 필요(건전도<55) 대수
     avg_health = round(sum(a["health"] for a in agvs) / max(len(agvs), 1))
     edge_active = sum(1 for a in agvs if a["edge_input"]["active"])
-    return {"type": "state", "p": round(p, 4), "agvs": agvs,
+    return {"type": "state", "generated_at": now, "demo": DEMO.state(), "p": round(p, 4), "agvs": agvs,
             "kpi": {"total": len(PLAN), "ok": len(PLAN) - w, "warn": w,
                     "per_floor": per, "by_level": by_level, "deteriorating": deteriorating,
                     "maint_due": maint_due, "avg_health": avg_health},
@@ -432,23 +465,43 @@ def snapshot():
             "alerts": alerts}
 
 
-@app.on_event("startup")
-async def _advance():
-    async def loop():
-        tick = 0
-        while True:
-            P["v"] = (P["v"] + REPLAY_PROGRESS_PER_TICK) % 1.0
-            tick += 1
-            if tick % 10 == 0:                         # ~2Hz로 진단 이벤트 시계열 적재
-                now = time.time()
-                snap = snapshot()
-                STORE.record(now, snap["agvs"])
-                WORK_ORDERS.sync_from_snapshot(now, snap["agvs"])
-                EDGE.publish_snapshot(now, snap["agvs"])
-                if tick % 200 == 0:                    # 주기적 보존정책(오래된 이벤트 정리)
-                    STORE.prune()
-            await asyncio.sleep(0.05)
-    asyncio.create_task(loop())
+async def advance_loop():
+    tick = 0
+    previous = time.monotonic()
+    while True:
+        current = time.monotonic()
+        elapsed = min(current - previous, 0.25)
+        previous = current
+        if not DEMO.paused:
+            P["v"] = (P["v"] + elapsed / REPLAY_CYCLE_SEC * DEMO.speed) % 1.0
+        tick += 1
+        if tick % 10 == 0:
+            now = time.time()
+            snap = snapshot()
+            STORE.record(now, snap["agvs"])
+            WORK_ORDERS.sync_from_snapshot(now, snap["agvs"])
+            EDGE.publish_snapshot(now, snap["agvs"])
+            if tick % 200 == 0:
+                STORE.prune()
+        await asyncio.sleep(REPLAY_TICK_SEC)
+
+
+@app.get("/api/demo")
+def api_demo():
+    return JSONResponse(DEMO.state())
+
+
+@app.post("/api/demo")
+def api_demo_control(request: DemoControl):
+    try:
+        state = DEMO.update(request, {a["id"] for a in PLAN})
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    snap = snapshot()
+    now = time.time()
+    STORE.record(now, snap["agvs"])
+    WORK_ORDERS.sync_from_snapshot(now, snap["agvs"])
+    return JSONResponse(state)
 
 
 @app.get("/api/layout")
@@ -469,6 +522,7 @@ def api_data_source():
     return JSONResponse(dict(
         DATA_SOURCE,
         edge_active=active_edges,
+        demo=DEMO.state(),
         edge_input_ttl_sec=EDGE_INPUT_TTL_SEC,
         physical_robot_connected=False,
     ))
@@ -514,6 +568,8 @@ def api_rul_contract():
     return JSONResponse({
         **rul_calibration_contract(),
         "readiness": rul_readiness_report([]),
+        "trained_artifact": load_rul_baseline_metadata(
+            os.environ.get("RUL_BASELINE_META", os.path.join(DATA, "rul_baseline_meta.json"))),
         "sample_assets": samples,
     })
 
@@ -545,7 +601,7 @@ def api_dispatch_plan(agv: str = None):
 
 
 _HIST_COLS = ["ts", "pred", "conf", "level", "health", "vib", "batt", "temp",
-              "risk_score", "trend_slope"]
+              "risk_score", "trend_slope", "source"]
 
 
 @app.get("/api/history")
@@ -822,8 +878,8 @@ def index():
 
 @app.get("/demo")
 def demo():
-    """시연 허브 — 3D 트윈, 2D 관제, 운영 리포트, AI 품질 산출물을 한 화면에 연결."""
-    return FileResponse(os.path.join(STATIC, "demo.html"))
+    """The exhibition entrypoint shares the operational twin workspace."""
+    return FileResponse(os.path.join(STATIC, "twin.html"))
 
 
 @app.get("/twin")

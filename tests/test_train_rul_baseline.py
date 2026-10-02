@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import pytest
 
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, SRC)
@@ -50,3 +51,23 @@ def test_train_rul_baseline_writes_model_and_metadata(tmp_path):
     saved = json.loads(meta_path.read_text(encoding="utf-8"))
     assert saved == metadata
     assert saved["feature_fields"][0] == "health"
+    assert saved["split"] == "asset_group_holdout"
+    audit = saved["split_audit"]
+    assert not set(audit["train_assets"]) & set(audit["test_assets"])
+
+
+def test_single_asset_is_not_evaluated_on_training_data(tmp_path):
+    import csv
+    path = _training_csv(tmp_path)
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        fields = reader.fieldnames
+        rows = list(reader)
+    for row in rows:
+        row["asset_id"] = "only-one-asset"
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    with pytest.raises(ValueError, match="independent assets"):
+        train_rul_baseline(str(path))

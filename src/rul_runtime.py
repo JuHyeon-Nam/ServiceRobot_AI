@@ -10,6 +10,8 @@ when asset event/failure labels become available.
 from __future__ import annotations
 
 from collections.abc import Iterable
+import json
+from pathlib import Path
 
 
 RUL_SCHEMA = "fab.rul.calibration.v1"
@@ -37,6 +39,20 @@ MIN_CENSORED_WINDOWS = 10
 
 _SEVERITY_CODE = {"정상": 0, "주의": 1, "경고": 2, "위험": 3}
 _CENSORED_VALUES = {True, 1, "1", "true", "True", "censored", "CENSORED"}
+
+
+def load_rul_baseline_metadata(path: str) -> dict:
+    """Read metadata only. Never unpickle or promote an offline model to serving."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if (not isinstance(data, dict) or data.get("schema") != "fab.rul.baseline_model.v1"
+                or data.get("feature_fields") != list(RUL_FEATURES)):
+            return {"available": False, "reason": "incompatible_metadata"}
+    except FileNotFoundError:
+        return {"available": False, "reason": "not_trained"}
+    except (OSError, ValueError):
+        return {"available": False, "reason": "unreadable_metadata"}
+    return {"available": True, "serving_enabled": False, "metadata": data}
 
 
 def _num(value, default: float = 0.0) -> float:
@@ -119,10 +135,11 @@ def rul_readiness_report(rows: Iterable[dict]) -> dict:
             missing.add("failure_ts")
     assets = {row.get("asset_id") for row in records if row.get("asset_id")}
     censored = sum(row.get("censoring") in _CENSORED_VALUES for row in records)
-    failures = sum(
-        bool(row.get("failure_ts")) and row.get("censoring") not in _CENSORED_VALUES
+    failures = len({
+        (row.get("asset_id"), str(row.get("failure_ts")))
         for row in records
-    )
+        if row.get("failure_ts") not in (None, "", 0) and row.get("censoring") not in _CENSORED_VALUES
+    })
     checks = {
         "has_required_fields": not missing,
         "enough_failure_events": failures >= MIN_FAILURE_EVENTS,

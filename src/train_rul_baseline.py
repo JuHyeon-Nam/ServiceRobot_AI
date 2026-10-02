@@ -19,19 +19,12 @@ import numpy as np
 from sklearn.dummy import DummyRegressor
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit
 
 from rul_runtime import RUL_FEATURES, RUL_SCHEMA, RUL_TARGET
 
 
 MODEL_SCHEMA = "fab.rul.baseline_model.v1"
-
-
-def _num(value, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def load_rul_training_csv(path: str) -> tuple[np.ndarray, np.ndarray, list[dict]]:
@@ -43,22 +36,29 @@ def load_rul_training_csv(path: str) -> tuple[np.ndarray, np.ndarray, list[dict]
             rows.append(row)
     if len(rows) < 4:
         raise ValueError("RUL baseline needs at least 4 observed failure rows")
-    x = np.asarray([[_num(row.get(name)) for name in RUL_FEATURES] for row in rows], dtype=np.float32)
-    y = np.asarray([_num(row.get(RUL_TARGET)) for row in rows], dtype=np.float32)
+    try:
+        x = np.asarray([[float(row[name]) for name in RUL_FEATURES] for row in rows], dtype=np.float32)
+        y = np.asarray([float(row[RUL_TARGET]) for row in rows], dtype=np.float32)
+    except (KeyError, TypeError, ValueError) as e:
+        raise ValueError("RUL rows require numeric features and targets; missing values are not imputed") from e
     return x, y, rows
 
 
 def train_rul_baseline(path: str, random_state: int = 42, test_size: float = 0.3) -> dict:
     t0 = time.time()
     x, y, rows = load_rul_training_csv(path)
-    if len(rows) < 8:
-        x_train, x_test, y_train, y_test = x, x, y, y
-        split = "train_eval_same_small_sample"
-    else:
-        x_train, x_test, y_train, y_test = train_test_split(
-            x, y, test_size=test_size, random_state=random_state
-        )
-        split = "random_holdout"
+    if not np.isfinite(x).all() or not np.isfinite(y).all() or (y < 0).any():
+        raise ValueError("RUL features and targets must be finite, with nonnegative targets")
+    if any(not row.get("asset_id") or not row.get("failure_ts") for row in rows):
+        raise ValueError("asset_id and failure_ts are required for leakage-safe evaluation")
+    groups = np.asarray([row["asset_id"] for row in rows])
+    if len(set(groups)) < 2:
+        raise ValueError("RUL holdout needs at least 2 independent assets; train-on-train evaluation is disabled")
+    train_idx, test_idx = next(GroupShuffleSplit(
+        n_splits=1, test_size=test_size, random_state=random_state
+    ).split(x, y, groups))
+    x_train, x_test, y_train, y_test = x[train_idx], x[test_idx], y[train_idx], y[test_idx]
+    split = "asset_group_holdout"
 
     model = GradientBoostingRegressor(
         n_estimators=120,
@@ -89,6 +89,9 @@ def train_rul_baseline(path: str, random_state: int = 42, test_size: float = 0.3
         "train_rows": len(y_train),
         "test_rows": len(y_test),
         "split": split,
+        "split_audit": {"train_assets": sorted(set(groups[train_idx])),
+                        "test_assets": sorted(set(groups[test_idx])),
+                        "asset_overlap": 0},
         "metrics": {
             "mae_min": round(float(mae), 4),
             "rmse_min": round(float(rmse), 4),

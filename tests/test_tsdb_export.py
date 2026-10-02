@@ -71,3 +71,12 @@ def test_json_export_payload():
     assert media.startswith("application/json")
     assert parsed["schema"] == "fab.telemetry.tsdb_export.v1"
     assert parsed["events"][0]["agv"] == "AGV-01"
+
+
+def test_scenario_provenance_survives_external_export():
+    from tsdb_export import to_influx_lines, to_timescale_sql
+    row = _row(source="demo_scenario")
+    assert 'source=demo_scenario' in to_influx_lines([row])
+    sql = to_timescale_sql([row])
+    assert "'demo_scenario'" in sql
+    assert 'ADD COLUMN IF NOT EXISTS source TEXT' in sql

@@ -72,6 +72,7 @@ def payload_from_agv(ts: float, agv: dict) -> dict:
         },
         "source": {
             "inference_mode": agv.get("inference_mode", "live_booster"),
+            "scenario": agv.get("scenario"),
             "latency_ms": agv.get("model_latency_ms"),
             "replay_fault": agv.get("replay_pred"),
         },

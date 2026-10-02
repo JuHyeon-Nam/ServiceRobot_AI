@@ -50,7 +50,7 @@
 
 ## Current Completion
 
-Portfolio demo: **99% complete**.
-
-The core experience is demo-ready. The remaining highest-impact work is recording
-a polished 2-3 minute demo video and linking it at the top of the README.
+Completion is tracked by verified workflows, not an estimated percentage.
+The integrated workspace supports asset selection, scripted fault progression,
+maintenance actions, and model evidence. See `PROJECT_STATUS.md` for current
+checks and the remaining field-data, hardware, and deployment validation work.

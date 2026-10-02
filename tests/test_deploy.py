@@ -31,6 +31,10 @@ def test_dockerfile_contract_for_compose():
 
     assert "COPY data/processed/ data/processed/" in dockerfile
     assert "COPY src/ src/" in dockerfile
+    assert "COPY assets/ assets/" in dockerfile
+    ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+    assert "!assets/*.gif" in ignore and "!assets/*.png" in ignore
+    assert "assets" not in ignore.splitlines()
     assert 'CMD ["uvicorn", "realtime_server:app"' in dockerfile
 
 

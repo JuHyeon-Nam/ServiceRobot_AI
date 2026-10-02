@@ -89,7 +89,8 @@ def normalize_event(row: dict) -> dict:
 
 def read_events_csv(path: str) -> list[dict]:
     with open(path, newline="", encoding="utf-8") as f:
-        return [normalize_event(row) for row in csv.DictReader(f) if _asset_id(row)]
+        return [normalize_event(row) for row in csv.DictReader(f)
+                if _asset_id(row) and row.get("source") != "demo_scenario"]
 
 
 def read_events_sqlite(path: str, limit: int | None = None, since: float = 0.0) -> list[dict]:
@@ -97,10 +98,11 @@ def read_events_sqlite(path: str, limit: int | None = None, since: float = 0.0) 
         cols = {row[1] for row in cx.execute("PRAGMA table_info(events)").fetchall()}
         risk_expr = "risk_score" if "risk_score" in cols else "NULL AS risk_score"
         slope_expr = "trend_slope" if "trend_slope" in cols else "NULL AS trend_slope"
+        source_filter = " AND COALESCE(source, 'legacy') != 'demo_scenario'" if "source" in cols else ""
         q = (
             "SELECT ts,agv,floor,pred,conf,level,health,vib,batt,temp,"
             f"{risk_expr},{slope_expr} "
-            "FROM events WHERE ts>=? ORDER BY ts ASC"
+            f"FROM events WHERE ts>=?{source_filter} ORDER BY ts ASC"
         )
         args: list = [since]
         if limit:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from uuid import uuid4
 
 
 _DDL = """CREATE TABLE IF NOT EXISTS work_orders(
@@ -89,6 +90,8 @@ class WorkOrderStore:
         self.cx.execute(_DDL)
         self.cx.execute("CREATE INDEX IF NOT EXISTS ix_work_orders_status ON work_orders(status)")
         self.cx.execute("CREATE INDEX IF NOT EXISTS ix_work_orders_agv ON work_orders(agv, status)")
+        self.cx.execute("CREATE TABLE IF NOT EXISTS work_order_signals "
+                        "(agv TEXT, fault TEXT, active INTEGER, PRIMARY KEY(agv, fault))")
         self.cx.commit()
         self.lock = threading.Lock()
 
@@ -98,38 +101,53 @@ class WorkOrderStore:
         for agv in agvs:
             fault = agv.get("pred", "정상")
             health = int(agv.get("health", 100))
-            needs_order = agv.get("status") == "warn" or health < 55
-            if not needs_order:
-                continue
-            level = agv.get("level") or "주의"
+            phm = agv.get("phm") or {}
+            needs_order = (agv.get("status") == "warn" or health < 55
+                           or phm.get("stage") == "predicted_fault")
+            level = agv.get("level") or phm.get("severity") or "주의"
             order_id = f"WO-{agv['id']}-{fault}"
             priority = priority_for(level, health)
             title = f"{agv['id']} {agv.get('label', fault)} 점검"
             rec = recommendation_for(fault, level, health)
             with self.lock:
+                self.cx.execute("UPDATE work_order_signals SET active=0 WHERE agv=? AND fault!=?",
+                                (agv["id"], fault))
+                signal = self.cx.execute("SELECT active FROM work_order_signals WHERE agv=? AND fault=?",
+                                         (agv["id"], fault)).fetchone()
+                self.cx.execute("INSERT INTO work_order_signals VALUES(?,?,?) "
+                                "ON CONFLICT(agv,fault) DO UPDATE SET active=excluded.active",
+                                (agv["id"], fault, int(needs_order)))
+                if not needs_order:
+                    self.cx.commit()
+                    continue
                 row = self.cx.execute(
-                    "SELECT status FROM work_orders WHERE id=?", (order_id,)
+                    "SELECT id,status FROM work_orders WHERE agv=? AND fault=? "
+                    "ORDER BY created_ts DESC, rowid DESC LIMIT 1", (agv["id"], fault)
                 ).fetchone()
-                if row and row[0] in OPEN_STATUSES:
+                if row and row[1] in OPEN_STATUSES:
                     self.cx.execute(
                         "UPDATE work_orders SET updated_ts=?, floor=?, level=?, health=?, "
-                        "priority=?, recommendation=? WHERE id=?",
-                        (ts, agv.get("floor"), level, health, priority, rec, order_id),
+                        "priority=?, recommendation=?, source=? WHERE id=?",
+                        (ts, agv.get("floor"), level, health, priority, rec,
+                         agv.get("source", "live_booster"), row[0]),
                     )
                 elif not row:
                     self.cx.execute(
                         "INSERT INTO work_orders VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (order_id, ts, ts, agv["id"], agv.get("floor"), fault, level, health,
-                         priority, "open", title, rec, "live_booster"),
+                         priority, "open", title, rec, agv.get("source", "live_booster")),
                     )
-                else:
-                    # A closed order is not reopened automatically; create a fresh revision.
-                    order_id = f"{order_id}-{int(ts)}"
+                elif signal and not signal[0]:
+                    # A new episode requires recovery after the previous order was resolved.
+                    order_id = f"{order_id}-{int(ts)}-{uuid4().hex[:8]}"
                     self.cx.execute(
                         "INSERT INTO work_orders VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (order_id, ts, ts, agv["id"], agv.get("floor"), fault, level, health,
-                         priority, "open", title, rec, "live_booster"),
+                         priority, "open", title, rec, agv.get("source", "live_booster")),
                     )
+                else:
+                    self.cx.commit()
+                    continue
                 self.cx.commit()
             changed += 1
         return changed

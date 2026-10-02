@@ -1,107 +1,57 @@
-# Project Status — ServiceRobot_AI
+# 프로젝트 상태
 
-## Ultimate Target
+기준일: 2026-10-02. 완성률 백분율 대신 실행 가능한 흐름과 검증 범위를 기록합니다.
 
-The final portfolio artifact is a **tablet-operable real-time 3D digital twin
-and predictive-maintenance control center** for service robots / FAB AGV fleets.
+## 목표
 
-It should show five capabilities in one coherent demo:
+서비스 로봇/AGV의 센서 데이터를 받아 상태를 진단하고, 위험 징후를 3D 공간에서 확인한 뒤 정비 처리까지 이어지는 디지털 트윈 시스템입니다.
 
-1. **AI PdM model**: diagnose normal + 8 fault states from robot sensor windows.
-2. **Real-time operations UI**: stream AGV state into a 2D/3D control center.
-3. **Data/AI operations layer**: persist telemetry, query history, monitor drift,
-   expose reliability metrics, turn alerts into maintenance work orders, and
-   document model governance.
-4. **Edge-to-cloud realism**: expose an MQTT-compatible telemetry contract that
-   can be replaced by a real broker and time-series DB.
-5. **Portable deployment**: run the whole demo on another machine with one
-   command and no original 4.2GB dataset.
+`데이터 입력 → 고장 진단 → PHM 위험 평가 → 3D 자산 확인 → 정비 작업 → 이력·리포트`
 
-## Current Completion
+## 구현 및 검증
 
-| Area | Status | Progress |
-|---|---|---:|
-| Core PdM model and honest validation | Done | 100% |
-| Explainability and feature contract | Done | 100% |
-| 3D digital twin demo | Done; slower replay, light high-legibility UI, normal/warning AGV click focus | 100% |
-| Live inference in twin stream | Done | 100% |
-| MQTT-style edge telemetry contract | Done | 100% |
-| Optional MQTT broker bridge | Done; publisher/subscriber runners plus Mosquitto compose smoke profile | 100% |
-| MQTT-fed sensor replay input | Done; inbound broker/API/physical-adapter payload overrides twin snapshot for a short TTL | 100% |
-| Telemetry storage / history / rollup | Done; stores PHM risk score and trend slope for RUL training | 100% |
-| External TSDB export contract | Done; Influx line protocol and Timescale SQL export include PHM/RUL features | 90% |
-| Predictive maintenance work orders | Done | 100% |
-| Operations dispatch plan | Done; per-AGV impact, SLA, route-block risk, and work-order candidate | 100% |
-| PHM forecast contract | Done; heuristic RUL includes supervised model slot, calibration contract, dataset builder, and offline baseline trainer | 97% |
-| Reliability, metrics, drift, model card | Done | 100% |
-| Portable deployment | Docker + compose + MQTT profile done; local Docker CLI unavailable here for manual run | 90% |
-| Physical/edge realism | MQTT contract + publisher + subscriber + Mosquitto profile + physical sensor adapter + TSDB export done | 96% |
-| Demo packaging | Visual demo hub, reviewer walkthrough, and capture checklist done; demo video still pending | 96% |
-
-Overall: **about 99% complete as a reviewable demo**, and **about 97% complete as
-a production-like robotics data platform**.
-
-## What Is Already Demo-Ready
-
-- `/demo`: visual demo hub that links the 3D twin, 2D control center, operations
-  report, shift handover, model card, and visible artifacts in one entry point.
-- `/twin`: 3D FAB/AGV digital twin with touch navigation and warning highlights.
-- `/`: 2D control center for KPI, alert feed, and fleet status scanning.
-- `/ws`: live fleet state stream.
-- `/api/snapshot`: current AGV state, KPI, and per-asset PHM forecast contract.
-- `/api/data-source`: explicit disclosure of AI-Hub replay, live LightGBM inference,
-  rule-based PHM/RUL, Edge TTL input, and physical-robot connection status.
-- `/api/phm`: PHM forecast summary with stage, severity, risk score, RUL estimate,
-  reasons, recommended action, and a transparent RUL model slot.
-- `/api/rul-contract`: feature fields, failure-time label requirements, readiness
-  checks, and sample AGV feature vectors for replacing heuristic RUL with a
-  calibrated regression or survival model.
-- `/api/dispatch-plan`: converts model/PHM output into operations impact,
-  affected zone, route-block risk, priority/SLA, and work-order candidate.
-- `/api/snapshot` inference block: live LightGBM Booster mode, feature count,
-  latency, call count, and replay audit fields.
-- `/api/edge-contract`, `/api/edge-events`: MQTT-compatible topic/payload
-  schema and recent edge telemetry message buffer.
-- `src/mqtt_bridge.py`: optional publisher that reads `/api/snapshot` and sends
-  validated edge telemetry envelopes to a real MQTT broker, with dry-run support.
-- `src/mqtt_subscriber.py`: optional subscriber that receives broker telemetry,
-  validates the payload contract, and forwards it into `/api/edge-ingest`.
-- `src/physical_sensor_adapter.py`: JSON/CSV sensor-line adapter that normalizes
-  physical edge readings into the same `/api/edge-ingest` contract.
-- `docker compose --profile mqtt up --build`: starts the API, Mosquitto broker,
-  and subscriber; `--profile mqtt-smoke` runs a one-shot publisher smoke.
-- `/api/edge-ingest`: validates inbound edge/MQTT payloads and temporarily
-  applies them to `/api/snapshot`, `/twin`, and PHM forecast output.
-- `/api/history`, `/api/stats`, `/api/trend`: telemetry persistence and analysis,
-  including risk score and trend slope needed by RUL training.
-- `/api/tsdb-contract`, `/api/tsdb-export?fmt=influx`,
-  `/api/tsdb-export?fmt=timescale`: external time-series DB export path with
-  PHM/RUL feature fields.
-- `src/build_rul_dataset.py`: joins stored telemetry with real failure labels to
-  produce a supervised-ready RUL training table.
-- `src/train_rul_baseline.py`: trains a Gradient Boosting RUL regression baseline
-  from observed failure rows and reports median-baseline comparison metrics.
-- `/api/reliability`: MTBF, MTTR, availability.
-- `/api/work-orders`: predictive fault / low-health AGVs converted to P1-P3
-  maintenance work orders with status tracking.
-- `/api/data-quality`: robotics dataset QA/governance metrics.
-- `/api/drift`: live data drift monitoring.
-- `/api/model-card`: model artifact hash, feature contract, metrics, limitations.
-- `/api/reviewer-brief`: 3-minute reviewer path, proof points, and role mapping.
-- `docs/DEMO_CAPTURE_CHECKLIST.md`: 2-3 minute screen-recording shot list.
-- `/metrics`: Prometheus-compatible monitoring.
-- `docker compose up --build`: one-command deployment entrypoint.
-
-## Remaining Work
-
-| Priority | Work | Why it matters |
+| 영역 | 구현된 동작 | 검증 범위 |
 |---|---|---|
-| P1 | Demo video, 2-3 minutes | Makes the project instantly reviewable in portfolio/resume contexts. |
-| P1 | README demo-video link | Turns the repository front page into a one-click visual review path. |
-| P3 | Calibrated RUL model | Replace the smoke-trained baseline with enough real failure-time labels, then validate regression or survival modeling. |
+| 통합 UI | 자산 검색·층/상태 필터, 3D 선택 확대, 정비·데이터/AI 탭 | Playwright 데스크톱·태블릿·모바일 시나리오, WebGL 픽셀 검사 |
+| 3D | 일정한 경로 속도, 느린 순찰, 자산 선택 시 층 집중, 사용자 선택 유지 | 캔버스 실제 클릭·비어 있지 않음·프레임 변화 검사 |
+| 시연 제어 | 정상·주의·예측 이상·배터리/통신 이상, 속도·주행 일시정지 | API 입력 검증, Edge 우선순위, 단계별 PHM 검사 |
+| 고장 진단 | 249개 feature, LightGBM 9-class 실시간 추론 | 기존 공식 검증 정확도 0.9329 / Macro F1 0.5838; 이번 변경으로 재학습하지 않음 |
+| 정비 | 접수→점검→조치 완료→종결; 정상 복귀 후 재발 시 새 작업 | 반복 동기화·재시작 후 중복 억제, UI 처리 흐름 검사 |
+| 데이터 | SQLite 이력·CSV·TSDB export의 source 기록 | 마이그레이션 및 API 테스트; 수동 시나리오 RUL 학습 제외 |
+| RUL 학습 | 자산 단위 holdout, median baseline 비교, 독립 고장 사건 집계 | 합성 fixture로 파이프라인 검증; 현장 RUL 성능 검증 아님 |
+| 연결 | WebSocket + HTTP 폴링 대체, 데이터 갱신 경과 표시 | WebSocket 연결 차단 후 폴링 복구 검사 |
+| 배포 | Docker Compose, MQTT 프로필, 로컬 실행 | 이번 변경의 로컬 실행 검증; Docker·실물 MQTT 통합 재검증은 별도 |
 
-## Recommended Next Three Daily Commits
+로컬 Python 테스트 104개 및 6개 화면 크기(360~1920px) 브라우저 검증을 통과했습니다.
+브라우저 CI 자동 등록은 GitHub 토큰의 `workflow` 권한 부족으로 보류했습니다.
+`ci-workflow-with-browser.example.yml`에 적용 가능한 전체 설정을 보존합니다. 기존 Python·Docker CI는 유지됩니다.
+`scripts/verify_twin.mjs`는 별도 시연 서버에서 실행합니다. 서버 시나리오 설정은 실행 전 상태로 복원하지만 작업 이력은 남습니다.
 
-1. `docs(demo): add final video link placeholder`
-2. `feat(phm): expose optional trained RUL artifact metadata in /api/rul-contract`
-3. `feat(phm): add survival-model path for right-censored rows`
+```bash
+python -m pytest tests -q
+python -m compileall src tests
+git diff --check
+# Node.js + playwright와 Chrome이 설치된 환경
+TWIN_URL=http://127.0.0.1:8765 node scripts/verify_twin.mjs
+```
+
+## 데이터와 모델의 경계
+
+- 학습 데이터 출처는 AI-Hub입니다. 기본 런타임은 합성 센서 window와 리플레이를 사용하며 물리 로봇은 연결되지 않았습니다.
+- Edge 입력은 외부에서 보고한 진단과 센서를 반영합니다. 해당 자산의 보고 진단을 서버 모델이 검증한 것으로 표시하지 않습니다.
+- 수동 시연은 `demo_scenario`로 기록합니다. 모델 신뢰도는 표시하지 않으며, RUL dataset builder에서 제외합니다.
+- PHM 위험도와 점검 시점은 규칙 기반입니다. 실제 잔여수명, 고장 확률, 생산 손실 예측 모델로 검증되지 않았습니다.
+- 진단 상세의 점검 근거는 코드별 점검 항목입니다. `/predict`의 모델 기여도 기반 설명과 구분합니다.
+- 이벤트 중심 샘플링으로 계산한 신뢰성 지표는 현장 KPI와 동일하지 않습니다. 정상 관측·실제 정비 라벨을 포함한 검증이 필요합니다.
+
+## 다음 개발 단계
+
+| 순서 | 개발 내용 | 완료 판단 기준 |
+|---|---|---|
+| 1 | 실제 센서 또는 공개 run-to-failure 데이터 연결 | 출처·단위·샘플링 주기·자산 ID가 확인된 수집 로그와 재현 스크립트 |
+| 2 | 학습형 PHM 평가 | 자산·시간 분리, 희소 클래스별 recall, RUL MAE/오차 분포, baseline 비교 |
+| 3 | 전체 관측 시계열 및 고장 episode 라벨 | 정상 구간도 저장, 중복·결측 처리, 정비 전후 기준 확정 |
+| 4 | 운영 검증 | MQTT 실제 왕복, Docker 새 환경 실행, 재접속/TTL/지속 실행 부하 검사 |
+| 5 | 전시 마감 | 한국어 설명이 포함된 2~3분 영상, 실행 가이드, 발표자료, 실기기 리허설 |
+
+현재는 **진단·관제·정비를 연결한 실행 가능한 시뮬레이션 시스템**입니다. 현장 예지보전 시스템의 완성 여부는 실제 데이터·장비 검증이 끝난 뒤 판단합니다.
