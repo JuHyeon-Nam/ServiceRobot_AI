@@ -1,117 +1,125 @@
 # ServiceRobot_AI
 
-AI-Hub 서비스 로봇 센서 데이터를 이용해 **센서 구간 생성, 고장 진단, 추론 API,
-실시간 상태 스트리밍, 2D·3D 관제**를 하나의 실행 흐름으로 연결한 PHM 프로젝트입니다.
+**고장 진단 · 3D 디지털 트윈 · 정비 관리**
+
+AI-Hub 서비스 로봇 데이터를 활용한 상태진단 시스템. LightGBM 고장 분류와 규칙 기반 PHM 평가를 3D 관제·정비 작업에 연결.
 
 [![CI](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml/badge.svg)](https://github.com/JuHyeon-Nam/ServiceRobot_AI/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)
-![LightGBM](https://img.shields.io/badge/LightGBM-4.6-02569B?style=flat-square)
-![FastAPI](https://img.shields.io/badge/FastAPI-REST%20%2B%20WebSocket-009688?style=flat-square&logo=fastapi&logoColor=white)
-![Three.js](https://img.shields.io/badge/Three.js-3D%20monitoring-000000?style=flat-square&logo=threedotjs&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-telemetry-003B57?style=flat-square&logo=sqlite&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-compose-2496ED?style=flat-square&logo=docker&logoColor=white)
 
-[GitHub 프로필](https://github.com/JuHyeon-Nam)
+[3D 관제](#3d-관제) · [주요 기능](#주요-기능) · [기술 스택](#기술-스택) · [파이프라인](#파이프라인) · [모델 성능](#모델-성능) · [실행](#실행) · [상세 설명](docs/PORTFOLIO_WALKTHROUGH.md)
 
-프로젝트를 처음 설명하거나 시연할 때는 [한국어 프로젝트 설명·업그레이드 내역·시연 가이드](docs/PORTFOLIO_WALKTHROUGH.md)를 참고하세요.
-데이터와 AI의 동작, 현재 구현 범위, 3분 시연 순서, 예상 질문을 정리했습니다.
+## 3D 관제
 
-## Demo
+[![ServiceRobot_AI 통합 3D 관제 화면](assets/twin_workspace.png)](assets/twin_walkthrough.mp4)
 
-`/twin`과 `/demo`는 같은 통합 관제 화면입니다. 자산 목록에서 정상 AGV도 선택할 수 있으며,
-**센서·진단 확인 → PHM 위험 평가 → 정비 접수·점검·완료 → 이력·리포트**로 이어집니다.
+[시연 영상 · 38초](assets/twin_walkthrough.mp4) · [시연 가이드](docs/DEMO_CAPTURE_CHECKLIST.md)
 
-![통합 관제 워크스페이스](assets/twin_workspace.png)
+<details>
+<summary>상태 전환 시연 · 정상 → 주의 → 예측 이상 → 현재 이상</summary>
 
-[통합 관제 시연 영상 (38초)](assets/twin_walkthrough.mp4) · [상세 시연 순서](docs/DEMO_CAPTURE_CHECKLIST.md)
+![최신 3D 관제 상태 전환 시연](assets/twin_workspace.gif)
 
-기존 3D 구현 기록도 보존합니다.
+최신 관제 화면의 실제 브라우저 녹화에서 추출한 20초 구간. 수동 시나리오로 상태 전환과 자산 상세 동작 재현.
 
-![Replay-based 3D monitoring with live model inference](assets/twin_3d.gif)
+</details>
 
-| 2D control center | Feature importance |
+**자산 선택 → 센서·진단 확인 → 위험 평가 → 정비 처리 → 이력 조회**
+
+3층 가상 FAB와 27대 AGV 관제. 정상 자산도 선택·확대 가능. 선택 층 집중, 주변 설비 반투명 처리, 느린 카메라 순찰 적용.
+
+| 초록 · 정상 | 노랑 · 주의 | 주황 · 예측 이상 | 빨강 · 현재 이상 |
+|:---:|:---:|:---:|:---:|
+| 위험 점수 30 미만 | 위험 점수 30~54 | 위험 점수 55 이상 | 현재 고장 진단 |
+
+노랑·주황은 현재 고장 진단이 없는 자산에 적용하는 PHM 점검 단계. 미래 고장 확률을 의미하지 않음.
+
+## 주요 기능
+
+| 기능 | 구현 내용 |
 |---|---|
-| ![Control center](assets/control_center.png) | ![Feature importance](assets/feature_importance.png) |
+| 자산 관제 | 검색·층/상태 필터, 정상/이상 자산 선택, 확대·홈 복귀·전체 화면 구현. |
+| 주행 제어 | 시간 기준 경로 이동, 0.25× / 0.5× / 1×, 주행 일시정지 지원. 기본 0.5×에서 약 125초 주기. |
+| 고장 진단 | 30시점 센서 구간에서 정상 및 8개 고장 분류. 자산별 진단·모델 신뢰도·추론 시간 제공. |
+| PHM 평가 | 건전도·진단 추세·센서 임계 신호를 조합한 위험 점수와 점검 권고 구현. |
+| 정비 작업 | 접수 → 점검 → 조치 완료 → 종결. 동일 고장 중복 억제, 정상 복귀 후 재발 시 신규 작업 생성. |
+| 이력·리포트 | SQLite 이벤트 저장, 자산별 이력·CSV·추세·운영/인수인계 리포트 제공. |
+| 데이터·AI | 입력 출처, 데이터 품질, 분포 변화, 모델 카드와 검증 지표 조회. |
+| 연결·화면 | WebSocket 재접속·HTTP 폴링 대체, 갱신 경과 표시, 데스크톱·태블릿·모바일 대응. |
 
-| Per-class F1 | Confusion matrix |
-|---|---|
-| ![Per-class F1](assets/per_class_f1.png) | ![Confusion matrix](assets/confusion_matrix.png) |
+## 기술 스택
 
-## 관제 흐름
+| 영역 | 기술 | 용도 |
+|---|---|---|
+| 데이터 | ![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white) ![NumPy](https://img.shields.io/badge/NumPy-013243?style=flat-square&logo=numpy&logoColor=white) ![pandas](https://img.shields.io/badge/pandas-150458?style=flat-square&logo=pandas&logoColor=white) | JSON 파싱·센서 구간 생성·특징 추출 |
+| 모델 | ![LightGBM](https://img.shields.io/badge/LightGBM-02569B?style=flat-square) ![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=flat-square&logo=scikitlearn&logoColor=white) | 고장 분류·평가·오프라인 RUL 회귀 |
+| 서버 | ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white) ![Pydantic](https://img.shields.io/badge/Pydantic-E92063?style=flat-square&logo=pydantic&logoColor=white) | REST API·WebSocket·입력 검증 |
+| 관제 | ![Three.js](https://img.shields.io/badge/Three.js-000000?style=flat-square&logo=threedotjs&logoColor=white) ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black) ![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=flat-square&logo=html5&logoColor=white) ![CSS](https://img.shields.io/badge/CSS-663399?style=flat-square&logo=css&logoColor=white) | 3D 렌더링·자산 상세·반응형 UI |
+| 저장·연결 | ![SQLite](https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white) ![MQTT](https://img.shields.io/badge/MQTT-660066?style=flat-square&logo=mqtt&logoColor=white) | 이벤트·정비 저장, 외부 텔레메트리 연동 |
+| 실행·검증 | ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white) ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat-square&logo=githubactions&logoColor=white) ![pytest](https://img.shields.io/badge/pytest-0A9EDC?style=flat-square&logo=pytest&logoColor=white) ![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat-square) | 컨테이너 구성·CI·API/브라우저 검증 |
 
-1. 자산 검색과 층·상태 필터로 AGV를 선택합니다. 선택한 층에 집중하고 정상·이상 자산 모두 확대합니다.
-2. 정상은 초록, 주의는 노랑, 예측 이상은 주황, 현재 이상은 빨강으로 표시합니다.
-3. 자산 상세의 시연 상태에서 `정상 → 주의 → 예측 이상 → 배터리 이상`을 재현합니다.
-4. 정비 작업 탭에서 `접수 → 점검 시작 → 조치 완료 → 종결`을 처리합니다. 완료한 작업은 동일 신호로 중복 생성하지 않으며, 정상 복귀 후 재발하면 새 작업을 만듭니다.
-5. 데이터·AI 탭에서 공식 검증 지표, 입력 출처, PHM의 검증 범위를 확인합니다.
+Three.js·OrbitControls·Lucide는 로컬 자산으로 제공. Python 의존성은 `requirements*.txt`, 브라우저 검증 의존성은 `package-lock.json`에 고정.
 
-기본 주행은 0.5×로 약 125초에 한 바퀴이며 0.25× / 0.5× / 1×와 주행 일시정지를 지원합니다.
-이는 시각화 좌표의 시뮬레이션으로 실제 m/s 보정은 미적용입니다. 재생 설정과 시나리오는 같은 서버 세션에서 공유됩니다.
+## 파이프라인
 
-## Project Summary
-
-| Item | Evidence |
-|---|---|
-| Data | AI-Hub 실내공간 유지관리 서비스 로봇 JSON, 100만 건 이상 |
-| Task | 정상과 8개 고장을 구분하는 9-class 상태진단 |
-| Input | 30 timesteps, 5개 동적 센서와 9개 context 변수 |
-| Feature | flatten·평균·표준편차·drift·rFFT를 결합한 249개 특징 |
-| Model | LightGBM native model, 4.30 MiB, best iteration 73 |
-| Validation | official accuracy `0.9329`, macro-F1 `0.5838` |
-| Serving | FastAPI REST API, WebSocket state stream |
-| Interface | Canvas 2D 관제, Three.js 3D·자산 상세·정비·데이터/AI 통합 UI |
-| Operations | SQLite history, data QA, drift, reliability, work-order APIs |
-
-`0.9329`는 학습에 사용하지 않은 robot instance로 구성된 official validation split
-결과입니다. 희귀 고장 클래스의 표본이 적어 macro-F1이 낮다는 점도 함께 공개합니다.
-
-## Scope and Contribution
-
-- 원본 JSON을 30시점 sensor window로 묶고 학습·검증용 array로 변환
-- 통계·변화·주파수 특징을 구성하고 LightGBM 모델 학습·평가
-- 학습과 서빙이 동일한 249개 feature contract를 사용하도록 모듈화
-- `/predict` 추론 API와 `/ws` 상태 스트림 구성
-- 2D 관제와 Three.js 3D twin에서 상태·경고·진단 근거 시각화
-- telemetry 이력, drift·data quality·model card, 작업지시 흐름 구현
-- 물리 로봇 연결 전환을 위한 MQTT-compatible payload와 edge ingest 경로 구성
-- 자산 단위 holdout RUL 학습·독립 고장 사건 집계·시연 데이터 제외
-- 반응형 UI, WebSocket 장애 시 HTTP 폴링, 실제 WebGL 픽셀 기반 브라우저 검증
-
-## Architecture
+**학습**
 
 ```mermaid
 flowchart LR
-    raw["AI-Hub robot JSON"] --> build["30-step window<br/>feature builder"]
-    build --> split["official train / validation"]
-    split --> model["LightGBM<br/>9-class diagnosis"]
-    model --> api["FastAPI /predict"]
-    model --> runtime["live inference runtime"]
-    runtime --> ws["WebSocket /ws"]
-    ws --> ui["2D control center<br/>Three.js twin"]
-    runtime --> store["SQLite telemetry"]
-    store --> ops["history · trend · reliability<br/>drift · work orders"]
-    edge["MQTT / physical adapter"] --> ingest["validated edge ingest"]
-    ingest --> runtime
+    A["AI-Hub JSON<br/>로봇별 시계열 정렬"] --> B["30시점 구간<br/>249개 특징"]
+    B --> C["LightGBM 학습<br/>공식 Validation 평가"]
+    C --> D["모델 · 메타데이터 저장"]
 ```
 
-## Model Pipeline
+**운영**
 
-### Input contract
+```mermaid
+flowchart LR
+    A["리플레이 · 합성 입력"] --> B["저장된 모델<br/>공통 추론 런타임"]
+    B --> C["상태 통합<br/>PHM 규칙 평가"]
+    D["외부 입력<br/>MQTT · 센서 어댑터"] --> C
+    E["수동 시연"] --> C
+    C --> F["FastAPI<br/>WebSocket / HTTP"]
+    F --> G["3D 관제<br/>자산 상세 · 정비"]
+    C --> H[("SQLite")]
+    G -->|"정비 처리"| H
+    H --> I["이력 · CSV · 리포트"]
+    B --> J["별도 /predict API<br/>모델 기여도 설명"]
+```
 
-- Raw dynamic sensors: `batteryLevel`, `speed`, `x`, `y`, `degree`, `collision`, `obstacle`
-- Model dynamic sensors: `batteryLevel`, `speed`, `degree`, `collision`, `obstacle`
-- Context: `isOffline`, `nowCharging`, `emergencyStop`, `batteryUse`,
-  `batteryCycleCount`, `distance`, `crowd`, `deviceType`, `mainState`
-- Output: normal state or one of eight fault codes with confidence
+추론 API와 관제 서버는 `pdm_runtime.py`의 특징 생성·모델 로딩 로직 공유. 외부 입력은 보고된 센서·진단을 반영하며, 수동 시연 상태와 함께 출처를 별도 기록.
 
-Absolute `x`, `y` coordinates are retained for visualization but excluded from model input.
-This prevents the model from treating a site-specific coordinate as a shortcut for a fault.
+## 모델 성능
 
-### Diagnostic classes
-
-| Code | Meaning |
+| 항목 | 결과 |
 |---|---|
-| `normal` | 정상 |
+| 데이터 | AI-Hub 실내공간 유지관리 서비스 로봇 데이터 |
+| 과제 | 정상 + 8개 고장, 9-class 분류 |
+| 평가 | AI-Hub 공식 Validation split |
+| Accuracy | **93.29%** |
+| Macro-F1 | **0.5838** |
+| 정상 단일 예측 기준선 | Accuracy 약 83% |
+| 모델 | LightGBM native Booster · 4.30 MiB · best iteration 73 |
+
+저장된 [모델 메타데이터](data/processed/robot_pdm_enhanced_meta.json) 기준. 정상 비중이 높아 Accuracy와 Macro-F1 병기. 통신·센서 이상 등 희소 클래스의 검증 표본 부족은 추가 평가 과제.
+
+### 입력 및 특징
+
+| 구성 | 내용 | 차원 |
+|---|---|---:|
+| 동적 센서 | 배터리 잔량·속도·방향각·충돌·장애물, 30시점 | 150 |
+| 통계·변화량 | 센서별 평균·표준편차·앞뒤 구간 평균 차이 | 15 |
+| 주파수 | 센서별 rFFT magnitude 15개 | 75 |
+| 상태·맥락 | 오프라인·충전·비상정지·배터리 사용/사이클·누적 거리·혼잡도·장치 유형·운전 상태 | 9 |
+| **합계** | | **249** |
+
+절대좌표 `x`, `y`는 시각화에만 사용. 장소별 좌표 암기 위험을 줄이기 위해 모델 입력에서 제외. 30시점의 실제 시간 길이는 샘플링 주기에 따라 결정.
+
+<details>
+<summary>진단 코드 · 9개 상태</summary>
+
+| 코드 | 상태 |
+|---|---|
+| `정상` | 정상 운전 |
 | `E-ENV-C` | 충돌 위험 |
 | `E-ENV-O` | 장애물·경로 방해 |
 | `E-INF-A` | 자동문 인터페이스 이상 |
@@ -121,109 +129,108 @@ This prevents the model from treating a site-specific coordinate as a shortcut f
 | `E-RBT-N` | 네트워크 이상 |
 | `E-RBT-S` | 센서 이상 |
 
-## Troubleshooting
+</details>
 
-### 1. High accuracy hid rare-fault failures
+[모델 카드](docs/MODEL_CARD.md) · [클래스별 F1](assets/per_class_f1.png) · [Confusion matrix](assets/confusion_matrix.png) · [특징 중요도](assets/feature_importance.png)
 
-정상 데이터가 약 83%인 환경에서는 accuracy만으로 모델을 평가하면 희귀 고장 미탐을
-가릴 수 있었습니다. official split의 macro-F1과 클래스별 F1, confusion matrix를 함께
-확인하고, validation support가 매우 작은 고장은 별도 한계로 표시했습니다.
+## 설계 및 검증 범위
 
-### 2. Coordinates behaved like a site identifier
-
-초기 분석에서 절대좌표가 높은 중요도를 보였습니다. 다른 사이트에서는 좌표계가 달라질
-수 있으므로 `x`, `y`를 모델 입력에서 제거하고 이동 방향과 상태·누적 신호 중심으로
-feature contract를 다시 구성했습니다.
-
-### 3. Training and serving could diverge
-
-학습 코드와 API가 각각 특징을 만들면 순서·차원이 어긋날 위험이 있었습니다.
-`pdm_runtime.py`의 공통 feature builder와 model metadata 검증을 통해 249개 입력 순서를
-고정하고, API contract test로 회귀를 확인했습니다.
-
-### 4. A visual demo could be mistaken for a physical deployment
-
-3D 이동과 sensor window는 재현 가능한 합성 입력이며, LightGBM은 미캐시 window에서 추론합니다.
-수동 시나리오는 모델 출력을 강제한 시연 상태로, 화면에 신뢰도를 표시하지 않습니다. 이를 `/api/data-source`와 model card에 노출하고, 실제 센서는
-`/api/edge-ingest` 앞단의 MQTT subscriber 또는 physical adapter로 교체하도록 경계를
-분리했습니다.
-
-## Real-time and Operations Layer
-
-| Endpoint | Purpose |
+| 설계 항목 | 적용 내용 |
 |---|---|
-| `POST /predict` | 30-step sensor window 상태진단 |
-| `GET /api/snapshot` | AGV 상태·진단·경고 snapshot |
-| `WS /ws` | 실시간 fleet state stream |
-| `GET /api/history` | asset별 telemetry 이력 |
-| `GET /api/trend` | 시간 구간별 상태 집계 |
-| `GET /api/data-quality` | 입력 데이터 QA |
-| `GET /api/drift` | 기준 운전분포 대비 drift 확인 |
-| `GET /api/model-card` | artifact hash·feature contract·한계 |
-| `GET /api/work-orders` | 이상 상태를 정비 작업 후보로 변환 |
-| `POST /api/edge-ingest` | 검증된 외부 telemetry 입력 |
-| `GET/POST /api/demo` | 자산별 시나리오와 재생 제어 |
-| `POST /api/work-orders/{id}/status` | 정비 접수·점검·완료·종결 |
-| `GET /api/rul-contract` | RUL 준비도·선택형 오프라인 학습 메타데이터 |
-| `GET /api/shift-handover?fmt=md` | 인수인계 리포트 내보내기 |
+| 입력 일관성 | 추론 API·관제 공통 런타임, 249개 특징 계약 검증. |
+| 데이터 추적 | `replay_model` / `demo_scenario` / `edge_ingest` 출처 저장. MQTT 전달·CSV·TSDB export에도 출처 유지. |
+| 정비 사건 관리 | 동일 고장 작업 중복 억제, 정상 복귀 후 재발 구분. SQLite에 사건 상태 저장. |
+| RUL 평가 | 자산 단위 holdout, 중앙값 기준선 비교, 독립 고장 사건 집계. 수동 시연 데이터 제외. |
+| 연결 복구 | WebSocket 재접속과 HTTP 폴링 대체. 마지막 데이터 갱신 경과 표시. |
+| 화면 검증 | 실제 WebGL 픽셀·프레임 변화, 자산 클릭, 상태 전환, 정비 작업, 반응형 검사. |
 
-PHM 위험도와 RUL은 현재 health·trend·sensor signal을 이용한 heuristic입니다.
-실제 failure-time label이 확보될 때 supervised regression 또는 survival model로 교체할 수
-있도록 dataset builder, model slot, 오프라인 baseline trainer를 구성했습니다. smoke fixture 결과를 현장 성능으로
-주장하지 않습니다.
+| 구분 | 현재 범위 |
+|---|---|
+| 고장 진단 | 공개 서비스 로봇 데이터로 학습한 LightGBM 분류 모델. |
+| 기본 시연 | 합성 센서 구간·리플레이에 모델 추론 적용. 물리 로봇 기본 미연결. |
+| 수동 시나리오 | 상태를 강제해 화면·정비 흐름 재현. 모델 신뢰도 표시 제외. |
+| 외부 입력 | 센서·위치·보고 진단 반영. 어댑터의 기본 진단은 임계값 규칙 사용. |
+| PHM·RUL | 운영 화면은 건전도·추세·센서 기반 규칙. RUL 데이터 생성·회귀 학습은 오프라인 파이프라인으로 제공. |
+| 3D·운영 지표 | 가상 FAB 시각화와 시뮬레이션 관측 지표. 실제 속도·물리 모델·생산 KPI 보정은 후속 검증 범위. |
 
-- `source`로 `replay_model`, `demo_scenario`, `edge_ingest`를 구분합니다. 외부 입력은 수동 시나리오보다 우선합니다.
-- 이벤트 이력·CSV·TSDB export에 출처를 남기고, MQTT 왕복에서도 수동 시연 출처를 유지합니다.
-- RUL dataset builder는 수동 시연 기록을 제외합니다. 준비도는 센서 행 수가 아니라 독립 자산·고장 시각 쌍으로 계산합니다.
-- RUL trainer는 자산별 holdout으로 분리하며, 단일 자산 데이터의 학습/평가 재사용을 거부합니다.
-- 선택형 `RUL_BASELINE_META` 메타데이터가 있어도 운영 PHM 모델로 자동 전환하지 않습니다.
-- 3D 점검 근거는 코드별 점검 항목과 PHM 규칙 신호입니다. 모델 기여도 분석은 별도 `/predict` 경로에서 제공합니다.
-- 이벤트 기반 MTBF/MTTR·가용도·영향도는 시뮬레이션 관측 지표이며 검증된 생산 KPI가 아닙니다.
+기본 화면의 진동·온도는 관제용 합성 신호이며 LightGBM 동적 입력에 포함되지 않음. 3D 점검 근거는 코드별 점검 항목, `/predict` 설명은 모델 기여도 기반. 현장 PHM 적용에는 실제 고장 시각 라벨·장비·MQTT 통합 검증 필요.
 
-## Run
+## 실행
 
-### Local
+Python 3.11 기준. 저장된 모델과 리플레이로 관제 실행 가능. 원본 데이터 재처리는 별도 AI-Hub 데이터와 경로 설정 필요.
+
+### 로컬 관제
+
+저장소 루트에서 실행.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-server.txt
-cd src
-uvicorn realtime_server:app --reload
+uvicorn realtime_server:app --app-dir src --reload --port 8000
 ```
 
-- 통합 관제: `http://127.0.0.1:8000/demo`
-- 2D control center: `http://127.0.0.1:8000/`
-- 3D twin: `http://127.0.0.1:8000/twin`
-- API docs: `http://127.0.0.1:8000/docs`
+Windows 가상환경 활성화: `.venv\Scripts\activate`.
 
-센서 window를 직접 전송하는 `/predict` 및 기여도 기반 설명은 별도 추론 서버에서 제공합니다.
-새 터미널에서 `cd src` 후 `uvicorn app:app --port 8001`을 실행하면
-`http://127.0.0.1:8001/docs`에서 입력·응답을 확인할 수 있습니다.
+| 화면 | 주소 |
+|---|---|
+| 통합 3D 관제 | [localhost:8000/twin](http://127.0.0.1:8000/twin) |
+| 관제 API 문서 | [localhost:8000/docs](http://127.0.0.1:8000/docs) |
 
-### Docker
+`/demo`는 `/twin`과 동일한 화면. 시연 설정은 같은 서버에 접속한 화면에서 공유.
+
+### 별도 추론 API
+
+새 터미널에서 가상환경 활성화 후 실행.
+
+```bash
+cd src
+uvicorn app:app --reload --port 8001
+```
+
+[`localhost:8001/docs`](http://127.0.0.1:8001/docs)에서 30×7 센서 구간과 context를 입력해 `/predict` 호출. 내부 모델 특징 생성 시 `x`, `y` 제외.
+
+### Docker Compose
 
 ```bash
 docker compose up --build
 ```
 
-Optional MQTT smoke profile:
+관제 포트 `8000`, SQLite 영구 볼륨 `telemetry-data`. 선택형 MQTT smoke 환경:
 
 ```bash
 docker compose --profile mqtt-smoke up --build
 ```
 
-## Test
+## API
 
-백엔드 검증:
+관제 서버 `:8000`과 추론 서버 `:8001`로 구분.
+
+| 서버 | 경로 | 기능 |
+|---|---|---|
+| 추론 | `POST /predict` | 센서 구간 고장 분류·모델 기여도 설명 |
+| 관제 | `WS /ws`, `GET /api/snapshot` | 플릿 상태 스트림·현재 상태 조회 |
+| 관제 | `GET/POST /api/demo` | 자산별 시연 상태·재생 제어 |
+| 관제 | `POST /api/edge-ingest` | 외부 텔레메트리 입력 |
+| 관제 | `GET /api/history`, `GET /api/trend` | 자산 이력·시간 구간 집계 |
+| 관제 | `GET /api/work-orders` | 정비 작업 조회 |
+| 관제 | `POST /api/work-orders/{id}/status` | 정비 작업 상태 변경 |
+| 관제 | `GET /api/data-quality`, `GET /api/drift` | 데이터 품질·분포 변화 조회 |
+| 관제 | `GET /api/model-card`, `GET /api/data-source` | 모델 정보·데이터 출처 조회 |
+| 관제 | `GET /api/rul-contract` | RUL 계약·데이터 준비도·오프라인 모델 메타데이터 |
+| 관제 | `GET /api/shift-handover?fmt=md` | 인수인계 리포트 |
+| 관제 | `GET /metrics` | Prometheus 운영 지표 |
+
+## 테스트
+
+**검증 기록: 2026-10-02 · Python 104개 통과 · 브라우저 6개 화면 크기 검증.**
 
 ```bash
 pip install -r requirements.txt
 python -m pytest tests -q
-python -m compileall src tests
 ```
 
-별도 로컬 시연 서버를 실행한 뒤 브라우저 검증:
+Node.js 20 이상. 별도 관제 서버 실행 후 브라우저 검증:
 
 ```bash
 npm ci
@@ -231,41 +238,26 @@ npx playwright install chromium
 CHROME_CHANNEL=chromium TWIN_URL=http://127.0.0.1:8000 npm run test:ui
 ```
 
-브라우저 검증은 6개 화면 크기, 정상·주의·예측·고장 시나리오, 정비 처리,
-WebGL 렌더링·클릭·움직임, WebSocket 장애 시 폴링 복구를 확인합니다.
-설정은 복원하지만 테스트 작업 이력은 남으므로 별도 시연 서버에서 실행합니다.
-기존 GitHub Actions는 Python·Docker 검증을 수행합니다. 브라우저 검증을 추가하는
-[워크플로 예제](docs/ci-workflow-with-browser.example.yml)도 제공합니다.
-현재 푸시 토큰에 `workflow` 권한이 없어 자동 등록은 보류되어 있으며, 브라우저 검증은 로컬에서 실행했습니다.
+360~1920px 화면에서 렌더링·클릭·움직임·4단계 상태·정비 처리·WebSocket 차단 시 폴링 복구 확인. 시연 설정은 복원하나 정비 이력은 남으므로 별도 테스트 서버 권장.
 
-Tests cover feature contracts, prediction, twin payloads, telemetry storage, edge ingest,
-data QA, drift, reliability, work orders and RUL dataset preparation.
+GitHub Actions에 Python 테스트·Docker smoke 작업 구성. 브라우저 검증은 로컬 수행, [CI 확장 예제](docs/ci-workflow-with-browser.example.yml) 제공. 최신 UI 변경의 로컬 Docker 실행은 별도 재검증 필요.
 
-## Repository Guide
+## 코드 구성
 
-| Path | Description |
+| 경로 | 역할 |
 |---|---|
-| `src/build_enhanced_dataset.py` | JSON parsing and window generation |
-| `src/train_enhanced.py` | LightGBM training |
-| `src/evaluate_enhanced.py` | official validation evaluation |
-| `src/pdm_runtime.py` | shared feature and inference contract |
-| `src/app.py` | inference API |
-| `src/realtime_server.py` | WebSocket, twin and operations API |
-| `src/telemetry_store.py` | SQLite telemetry layer |
-| `src/static/` | 2D 관제, 통합 3D UI, 로컬 Three.js·Lucide |
-| `src/demo_runtime.py` | 명시적 시연 상태 및 제어 계약 |
-| `scripts/verify_twin.mjs` | 반응형 UI·WebGL·정비 흐름 검증 |
-| `scripts/capture_demo.mjs` | 실제 브라우저 시연 프레임 캡처 |
-| `docs/MODEL_CARD.md` | metrics, artifact and limitations |
-| `docs/PROJECT_STATUS.md` | implemented scope and remaining work |
+| `src/build_enhanced_dataset.py` | 원본 JSON·30시점 구간 생성 |
+| `src/train_enhanced.py`, `src/evaluate_enhanced.py` | LightGBM 학습·공식 Validation 평가 |
+| `src/pdm_runtime.py`, `src/app.py` | 공통 추론 런타임·추론 API |
+| `src/realtime_server.py`, `src/demo_runtime.py` | 상태 스트림·PHM·시연 제어 |
+| `src/static/twin*`, `src/fab_layout.py` | 3D 관제·자산 상세·레이아웃 |
+| `src/telemetry_store.py`, `src/work_order_store.py` | 이벤트·정비 사건 저장 |
+| `src/edge_gateway.py`, `src/physical_sensor_adapter.py`, `src/mqtt_*.py` | 외부 입력·센서 어댑터·MQTT |
+| `src/build_rul_dataset.py`, `src/train_rul_baseline.py`, `src/rul_runtime.py` | RUL 데이터·오프라인 학습·계약 |
+| `scripts/verify_twin.mjs`, `scripts/capture_demo.mjs` | 브라우저 검증·시연 캡처 |
 
-## Limitations
+## 문서
 
-- Training data is a public service-robot dataset, not a production FAB dataset.
-- The 3D twin uses replay trajectories and generated runtime windows.
-- Rare classes have low validation support and require additional data collection.
-- Physical robot, real broker and external time-series database integration require field validation.
-- RUL is not a field-calibrated remaining-life model.
+[프로젝트 상세 설명](docs/PORTFOLIO_WALKTHROUGH.md) · [구현 현황·다음 과제](docs/PROJECT_STATUS.md) · [모델 카드](docs/MODEL_CARD.md) · [시연 가이드](docs/DEMO_CAPTURE_CHECKLIST.md)
 
-The repository is designed to keep those boundaries visible while showing an end-to-end path from
-sensor data to diagnosis, monitoring and maintenance action.
+Maintainer: [JuHyeon-Nam](https://github.com/JuHyeon-Nam)
