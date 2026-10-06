@@ -19,6 +19,27 @@ import numpy as np
 MODEL_DYN_IDX = [0, 1, 4, 5, 6]  # batteryLevel, speed, degree, collision, obstacle
 
 
+def make_feature_matrix(windows: Any, contexts: Any) -> np.ndarray:
+    """One feature contract for training, evaluation, and online inference."""
+    raw = np.asarray(windows, dtype=np.float32)
+    static = np.asarray(contexts, dtype=np.float32)
+    if raw.ndim != 3 or raw.shape[1:] != (30, 7):
+        raise ValueError("sensor windows must have shape (n, 30, 7)")
+    if static.shape != (len(raw), 9):
+        raise ValueError("context features must have shape (n, 9)")
+    if not np.isfinite(raw).all() or not np.isfinite(static).all():
+        raise ValueError("sensor and context features must be finite")
+    x = raw[:, :, MODEL_DYN_IDX]
+    return np.hstack([
+        x.reshape(len(x), 150),
+        np.mean(x, 1),
+        np.std(x, 1),
+        np.mean(x[:, -10:, :], 1) - np.mean(x[:, :10, :], 1),
+        np.abs(np.fft.rfft(x, axis=1))[:, :15, :].reshape(len(x), 75),
+        static,
+    ]).astype(np.float32)
+
+
 def load_booster(path: str | Path) -> lgb.Booster:
     """Load a LightGBM native text model safely, including non-ASCII paths."""
     with open(path, "r", encoding="utf-8") as f:
@@ -47,15 +68,6 @@ def make_features(window: list, ctx: Any, dataset_meta: dict[str, Any]) -> np.nd
     mainmap = dataset_meta.get("mainstate_map", {})
     crowdmap = dataset_meta.get("crowd_map", {"LOW": 0, "MIDDLE": 1, "HIGH": 2})
 
-    xf = np.asarray(window, dtype=np.float32).reshape(1, 30, 7)
-    x = xf[:, :, MODEL_DYN_IDX]
-    eng = np.hstack([
-        x.reshape(1, -1),
-        np.mean(x, 1),
-        np.std(x, 1),
-        np.mean(x[:, -10:, :], 1) - np.mean(x[:, :10, :], 1),
-        np.abs(np.fft.rfft(x, axis=1))[:, :15, :].reshape(1, -1),
-    ])
     stat = np.array([[
         _get(ctx, "isOffline", 0),
         _get(ctx, "nowCharging", 0),
@@ -67,7 +79,7 @@ def make_features(window: list, ctx: Any, dataset_meta: dict[str, Any]) -> np.nd
         devmap.get(_get(ctx, "deviceType", "안내로봇"), 0),
         mainmap.get(_get(ctx, "mainState", "MOVE"), 0),
     ]], dtype=np.float32)
-    return np.hstack([eng, stat]).astype(np.float32)
+    return make_feature_matrix(np.asarray(window, dtype=np.float32)[None, :, :], stat)
 
 
 def predict_window(

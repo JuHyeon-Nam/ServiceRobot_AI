@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements-server.txt
 COPY data/processed/ data/processed/
 COPY src/ src/
 COPY assets/ assets/
+COPY docs/benchmarks/ docs/benchmarks/
 
 ENV PYTHONUTF8=1
 EXPOSE 8000

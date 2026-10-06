@@ -1,47 +1,44 @@
-"""
-evaluate_enhanced.py
---------------------
-저장된 강화 모델(robot_pdm_enhanced.txt)을 독립적으로 불러와
-공식 Validation set으로 실제 측정 + 혼동행렬 + 주요 오분류를 출력한다.
-"""
-import numpy as np, lightgbm as lgb, json
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score
+"""Evaluate a saved diagnosis model with per-class and confidence metrics."""
+from __future__ import annotations
 
-DATA = '../data/processed'
-MODEL_DYN_IDX = [0, 1, 4, 5, 6]  # x,y 제외 (train_enhanced.py와 동일)
+import argparse
+import json
+from pathlib import Path
 
-def feat(X, S):
-    X = X[:, :, MODEL_DYN_IDX]
-    N = X.shape[0]
-    eng = np.hstack([X.reshape(N, -1), np.mean(X, 1), np.std(X, 1),
-        np.mean(X[:, -10:, :], 1) - np.mean(X[:, :10, :], 1),
-        np.abs(np.fft.rfft(X, axis=1))[:, :15, :].reshape(N, -1)])
-    return np.hstack([eng, S]).astype(np.float32)
+from diagnosis_evaluation import classification_metrics
+from pdm_runtime import load_booster, make_feature_matrix as feat
+from train_diagnosis import load_dataset
 
-def main():
-    booster = lgb.Booster(model_file=f'{DATA}/robot_pdm_enhanced.txt')
-    mm = json.load(open(f'{DATA}/robot_pdm_enhanced_meta.json', encoding='utf-8'))
-    names = mm['class_names']; classes = np.array(mm['classes'])
-    va = np.load(f'{DATA}/enhanced_val.npz')
-    X = feat(va['X'], va['S']); y = va['y']
-    yp = classes[np.argmax(booster.predict(X), axis=1)]
+ROOT = Path(__file__).resolve().parents[1]
 
-    acc = accuracy_score(y, yp); f1m = f1_score(y, yp, average='macro')
-    base = max(np.mean(y == c) for c in np.unique(y))
-    print(f'공식 Validation {len(y)}건  정확도 {acc*100:.2f}%  macro-F1 {f1m:.4f}  (기준선 {base*100:.2f}%)\n')
-    print(classification_report(y, yp, digits=3, target_names=names))
 
-    print('\n=== 혼동행렬 (행=실제, 열=예측) ===')
-    cm = confusion_matrix(y, yp, labels=list(range(len(names))))
-    print('실제\\예측 ' + ' '.join(f'{i:>5}' for i in range(len(names))))
-    for i in range(len(names)):
-        print(f'{i:>2} {names[i][:8]:<8} ' + ' '.join(f'{cm[i,j]:>5}' for j in range(len(names))))
-    print('\n클래스 인덱스:', {i: n for i, n in enumerate(names)})
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-dir", type=Path, default=ROOT / "data/processed")
+    parser.add_argument("--model-dir", type=Path, default=ROOT / "data/processed")
+    parser.add_argument("--report", type=Path)
+    args = parser.parse_args(argv)
+    try:
+        dataset = load_dataset(args.data_dir / "enhanced_val.npz")
+        meta = json.loads((args.model_dir / "robot_pdm_enhanced_meta.json").read_text(encoding="utf-8"))
+        dataset_meta = json.loads((args.data_dir / "enhanced_meta.json").read_text(encoding="utf-8"))
+        model_dataset_meta = json.loads((args.model_dir / "enhanced_meta.json").read_text(encoding="utf-8"))
+        if dataset_meta["err_map"] != dict(zip(meta["class_names"], range(len(meta["class_names"])))):
+            raise ValueError("dataset and model label mappings differ")
+        for key in ("devtype_map", "mainstate_map", "crowd_map", "dyn", "stat"):
+            if dataset_meta[key] != model_dataset_meta[key]:
+                raise ValueError(f"dataset and model encodings differ: {key}")
+        booster = load_booster(args.model_dir / "robot_pdm_enhanced.txt")
+        report = classification_metrics(dataset["y"], booster.predict(dataset["features"]), meta["class_names"])
+    except (FileNotFoundError, ValueError) as error:
+        parser.exit(2, f"Diagnosis evaluation: {error}\n")
+    encoded = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(encoded + "\n", encoding="utf-8")
+    print(encoded)
+    return 0
 
-    print('\n=== 주요 오분류 Top5 ===')
-    mis = [(i, j, cm[i, j]) for i in range(len(names)) for j in range(len(names)) if i != j]
-    for i, j, c in sorted(mis, key=lambda t: -t[2])[:5]:
-        print(f'  {names[i]} -> {names[j]}: {c}건')
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    raise SystemExit(main())

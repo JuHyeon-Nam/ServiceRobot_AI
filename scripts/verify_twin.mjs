@@ -106,6 +106,43 @@ try {
   await page.screenshot({ path: output + "/orders.png", fullPage: true });
   await page.locator('[data-view="evidence"]').click();
   await waitForText("#evidenceContent", "Macro F1");
+  await waitForText("#benchmarkEndpoint", "관측");
+  assert.equal(await page.locator("#benchmarkEngine option").count(), 100);
+  const chartStats = () =>
+    page.locator("#benchmarkChart").evaluate((canvas) => {
+      const pixels = canvas
+        .getContext("2d")
+        .getImageData(0, 0, canvas.width, canvas.height).data;
+      let colored = 0,
+        hash = 0;
+      for (let i = 0; i < pixels.length; i += 16) {
+        if (
+          Math.max(pixels[i], pixels[i + 1], pixels[i + 2]) -
+            Math.min(pixels[i], pixels[i + 1], pixels[i + 2]) >
+          30
+        )
+          colored++;
+        hash = (hash * 31 + pixels[i] + pixels[i + 1]) | 0;
+      }
+      return { colored, hash };
+    });
+  const firstChart = await chartStats();
+  assert(firstChart.colored > 100, "blank RUL chart");
+  await page.locator("#benchmarkEngine").selectOption("100");
+  await waitForText("#benchmarkEndpoint", "예측");
+  await page.waitForFunction(() =>
+    document.querySelector("#benchmarkEndpoint").textContent.includes("관측"),
+  );
+  assert.notEqual(
+    (await chartStats()).hash,
+    firstChart.hash,
+    "engine selection did not redraw chart",
+  );
+  await page.locator("#rulBenchmark").scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: output + "/rul-benchmark.png",
+    fullPage: true,
+  });
   await page.screenshot({ path: output + "/evidence.png", fullPage: true });
   await page.locator('[data-view="twin"]').click();
   await page.locator("#homeBtn").click();
@@ -141,8 +178,12 @@ try {
       for (let x = Math.floor(w * 0.15); x < w * 0.9; x++) {
         const i = (y * w + x) * 4;
         const red = (offset) =>
-          (p[offset] > 110 && p[offset] > p[offset + 1] * 1.3 && p[offset] > p[offset + 2] * 1.2)
-          || (p[offset + 1] > 80 && p[offset + 1] > p[offset] * 1.4 && p[offset + 1] > p[offset + 2] * 1.12);
+          (p[offset] > 110 &&
+            p[offset] > p[offset + 1] * 1.3 &&
+            p[offset] > p[offset + 2] * 1.2) ||
+          (p[offset + 1] > 80 &&
+            p[offset + 1] > p[offset] * 1.4 &&
+            p[offset + 1] > p[offset + 2] * 1.12);
         if (
           red(i) &&
           red(i + 4) &&
@@ -192,8 +233,15 @@ try {
     await page.locator("#closeSelection").click();
     for (const nextView of ["orders", "evidence"]) {
       await page.locator(`[data-view="${nextView}"]`).click();
-      if (nextView === "evidence")
-        await waitForText("#evidenceContent", "Macro F1");
+      if (nextView === "evidence") {
+        await waitForText("#benchmarkEndpoint", "관측");
+        await page.locator("#rulBenchmark").scrollIntoViewIfNeeded();
+        assert((await chartStats()).colored > 30, `${name}: blank RUL chart`);
+        await page.screenshot({
+          path: `${output}/${name}-benchmark.png`,
+          fullPage: true,
+        });
+      }
       assert(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= innerWidth,
@@ -224,7 +272,7 @@ try {
     }),
   );
 } catch (error) {
-  await page.screenshot({path:output+'/failure.png',fullPage:true});
+  await page.screenshot({ path: output + "/failure.png", fullPage: true });
   throw error;
 } finally {
   const now = await (await request.get(url + "/api/demo")).json();

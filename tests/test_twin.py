@@ -54,6 +54,28 @@ def test_demo_assets_served(client):
     assert r.headers["content-type"].startswith("image/gif")
 
 
+def test_public_rul_benchmark_api(client):
+    report = client.get("/api/benchmarks/rul").json()
+    assert report["available"] and report["target_unit"] == "cycles"
+    assert not report["serving_enabled_for_agv"]
+    assert len(report["engine_ids"]) == 100
+    assert "engines" not in report
+    engine = client.get("/api/benchmarks/rul/engines/1").json()
+    assert engine["unit"] == 1 and len(engine["history"]) <= 30
+    assert engine["history"][-1]["true_rul"] == engine["true_rul"]
+    assert client.get("/api/benchmarks/rul/engines/999").status_code == 404
+
+
+def test_benchmark_unavailable_does_not_break_twin(client, monkeypatch, tmp_path):
+    path = tmp_path / "missing.json"
+    monkeypatch.setenv("RUL_BENCHMARK_REPORT", str(path))
+    assert not client.get("/api/benchmarks/rul").json()["available"]
+    assert client.get("/api/benchmarks/rul/engines/1").status_code == 503
+    path.write_text('{"schema":"wrong"}')
+    assert not client.get("/api/benchmarks/rul").json()["available"]
+    assert client.get("/api/snapshot").status_code == 200
+
+
 def test_layout_contract(client):
     L = client.get("/api/layout").json()
     assert L["canvas"] == {"w": 300, "h": 196}

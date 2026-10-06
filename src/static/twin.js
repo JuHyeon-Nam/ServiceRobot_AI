@@ -464,22 +464,134 @@ async function loadEvidence() {
   $("evidenceContent").innerHTML =
     '<p class="empty">검증 정보를 불러오는 중</p>';
   try {
-    const [card, source, rul] = await Promise.all([
+    const [card, source, rul, benchmark] = await Promise.all([
       api("/api/model-card"),
       api("/api/data-source"),
       api("/api/rul-contract"),
+      api("/api/benchmarks/rul").catch(() => ({ available: false })),
     ]);
     const val = card.performance.official_validation;
     $("evidenceContent").innerHTML =
       `<section class="evidence-section"><h3>고장 진단 · LightGBM</h3><div class="evidence-grid"><div><span>검증 정확도</span><strong>${(val.accuracy * 100).toFixed(2)}<small>%</small></strong><span>Official validation split</span></div><div><span>Macro F1</span><strong>${val.macro_f1.toFixed(4)}</strong><span>희소 고장 클래스 개선 필요</span></div><div><span>모델 입력</span><strong>${card.feature_engineering.n_features}</strong><span>30-step 센서 window · 9-class</span></div></div><p>정확도는 저장된 공식 검증 결과입니다. 시연의 합성 센서 입력에 대한 현장 성능을 의미하지 않습니다. 정상 클래스 비중이 높아 Macro F1과 클래스별 성능을 함께 확인해야 합니다.</p></section>
     <section class="evidence-section"><h3>데이터 출처와 처리 범위</h3><table><thead><tr><th>구간</th><th>현재 입력 / 처리</th><th>상태</th></tr></thead><tbody><tr><td>학습 데이터</td><td>AI-Hub 실내공간 유지관리 서비스 로봇</td><td>원본 재배포 제외</td></tr><tr><td>3D 주행 · 센서</td><td>결정론적 주행 + 합성 센서 window</td><td>시뮬레이션</td></tr><tr><td>진단</td><td>LightGBM 실시간 추론 / 외부 보고 / 수동 상태</td><td>자산별 출처 표시</td></tr><tr><td>외부 입력</td><td>Edge API · MQTT → WebSocket</td><td>${source.edge_active}대 반영 중</td></tr><tr><td>물리 로봇</td><td>센서 어댑터 구현, 현장 연결 검증 필요</td><td>미연결</td></tr></tbody></table></section>
     <section class="evidence-section"><h3>PHM · 잔여수명 검증</h3><p>현재 위험도와 점검 시점은 건전도·추세·센서 임계값으로 계산하는 규칙 기반 추정입니다. 실제 고장 시각 라벨로 보정된 잔여수명 예측은 아직 검증되지 않았습니다.</p><p>RUL 학습은 자산별 holdout으로 분리합니다. 동일 자산의 고장 구간이 학습과 평가에 섞이지 않으며, 수동 시나리오 기록은 학습 입력에서 제외됩니다.</p><div class="evidence-grid"><div><span>실패 시각 라벨</span><strong>${rul.readiness.failure_events}</strong><span>독립 고장 사건</span></div><div><span>RUL 런타임</span><strong style="font-size:21px">규칙 기반</strong><span>현장 보정 필요</span></div><div><span>오프라인 학습 메타데이터</span><strong style="font-size:21px">${rul.trained_artifact?.available ? "있음" : "미등록"}</strong><span>운영 모델 자동 전환 없음</span></div></div></section>
-    <section class="evidence-section"><h3>검증 자료</h3><div class="evidence-links"><a href="/api/model-card" target="_blank" rel="noopener">모델 카드</a><a href="/api/data-source" target="_blank" rel="noopener">데이터 출처</a><a href="/api/rul-contract" target="_blank" rel="noopener">RUL 계약</a><a href="/api/ops-report?fmt=md" download="operations.md">운영 리포트</a><a href="/api/tsdb-export?fmt=influx" download="telemetry.lp">시계열 내보내기</a><a href="/assets/twin_3d.gif" target="_blank" rel="noopener">기존 3D 시연</a></div></section>`;
+    ${benchmarkSection(benchmark)}
+    <section class="evidence-section"><h3>검증 자료</h3><div class="evidence-links"><a href="/api/model-card" target="_blank" rel="noopener">모델 카드</a><a href="/api/data-source" target="_blank" rel="noopener">데이터 출처</a><a href="/api/rul-contract" target="_blank" rel="noopener">RUL 계약</a><a href="/api/benchmarks/rul" target="_blank" rel="noopener">NASA 실험 결과</a><a href="/api/ops-report?fmt=md" download="operations.md">운영 리포트</a><a href="/api/tsdb-export?fmt=influx" download="telemetry.lp">시계열 내보내기</a><a href="/assets/twin_walkthrough.mp4" target="_blank" rel="noopener">3D 관제 시연</a></div></section>`;
+    if (benchmark.available) {
+      $("benchmarkEngine").onchange = loadBenchmarkEngine;
+      await loadBenchmarkEngine();
+    }
   } catch (error) {
     $("evidenceContent").innerHTML =
       `<p class="empty">${escape(error.message)}</p>`;
   }
 }
+
+function benchmarkSection(report) {
+  if (!report.available)
+    return '<section class="evidence-section"><h3>공개 데이터 · RUL 벤치마크</h3><p>검증 보고서 미등록</p></section>';
+  const metrics = report.test_metrics;
+  return `<section class="evidence-section" id="rulBenchmark"><h3>NASA C-MAPSS FD001 · 잔여수명 예측</h3>
+  <div class="evidence-grid"><div><span>MAE · 기준 모델 → LightGBM</span><strong>${report.baseline.mae_cycles.toFixed(2)} → ${metrics.mae_cycles.toFixed(2)}</strong><span>cycle · 공식 테스트 ${report.protocol.test_engines}대</span></div><div><span>RMSE</span><strong>${metrics.rmse_cycles.toFixed(2)}<small> cycle</small></strong><span>엔진별 마지막 관측 시점</span></div><div><span>예측 구간 포함률</span><strong>${(metrics.interval_coverage * 100).toFixed(0)}<small>%</small></strong><span>목표 ${(report.uncertainty.nominal_coverage * 100).toFixed(0)}% · 별도 보정 엔진 ${report.protocol.calibration_engines}대</span></div></div>
+  <p>NASA 엔진 열화 시뮬레이션의 오프라인 학습 결과입니다. 로봇 현장 데이터가 아니며 AGV의 실시간 위험도·분 단위 잔여수명에는 적용되지 않습니다.</p>
+  <div class="benchmark-toolbar"><label for="benchmarkEngine">테스트 엔진</label><select id="benchmarkEngine">${report.engine_ids.map((id) => `<option value="${Number(id)}">FD001 · ${Number(id)}</option>`).join("")}</select><span id="benchmarkEndpoint" aria-live="polite"></span></div>
+  <div class="benchmark-legend"><span class="prediction-key">예측</span><span class="truth-key">정답</span><span class="interval-key">예측 구간</span></div>
+  <canvas id="benchmarkChart" class="benchmark-chart" role="img" aria-label="엔진 잔여수명 예측과 정답 비교"></canvas>
+  <p>최근 최대 30 cycle의 인과적 예측. 구간 보정·포함률 평가는 마지막 관측 시점 기준이며, 전체 시점의 포함률을 보장하지 않습니다.</p></section>`;
+}
+
+let benchmarkRequest = 0;
+let benchmarkEngine = null;
+async function loadBenchmarkEngine() {
+  const request = ++benchmarkRequest;
+  const id = $("benchmarkEngine")?.value;
+  if (!id) return;
+  text("benchmarkEndpoint", "불러오는 중");
+  try {
+    const engine = await api(
+      `/api/benchmarks/rul/engines/${encodeURIComponent(id)}`,
+    );
+    if (request !== benchmarkRequest || !$("benchmarkChart")) return;
+    benchmarkEngine = engine;
+    const endpoint = engine.history.at(-1);
+    text(
+      "benchmarkEndpoint",
+      `관측 ${engine.last_cycle} cycle · 예측 ${engine.prediction.toFixed(1)} / 정답 ${engine.true_rul} · 구간 ${endpoint.lower.toFixed(1)}–${endpoint.upper.toFixed(1)} cycle`,
+    );
+    drawBenchmark(engine);
+  } catch {
+    if (request === benchmarkRequest)
+      text("benchmarkEndpoint", "실험 결과를 불러올 수 없습니다.");
+  }
+}
+
+function drawBenchmark(engine) {
+  const canvas = $("benchmarkChart");
+  if (!canvas || !canvas.clientWidth) return;
+  const width = canvas.clientWidth,
+    height = 250,
+    ratio = devicePixelRatio || 1;
+  canvas.width = Math.round(width * ratio);
+  canvas.height = height * ratio;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(ratio, ratio);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  const rows = engine.history,
+    left = 48,
+    right = width - 18,
+    top = 16,
+    bottom = height - 34;
+  const max =
+    Math.ceil(
+      Math.max(...rows.map((row) => Math.max(row.upper, row.true_rul))) / 20,
+    ) * 20 || 20;
+  const first = rows[0].cycle,
+    last = rows.at(-1).cycle;
+  const x = (row) =>
+    left + ((row.cycle - first) / Math.max(1, last - first)) * (right - left);
+  const y = (value) => bottom - (value / max) * (bottom - top);
+  ctx.font = "12px system-ui";
+  ctx.fillStyle = "#53616b";
+  ctx.fillText("RUL (cycle)", left, 12);
+  for (let i = 0; i <= 4; i++) {
+    const value = (max * i) / 4;
+    ctx.strokeStyle = "#e4e9ec";
+    ctx.beginPath();
+    ctx.moveTo(left, y(value));
+    ctx.lineTo(right, y(value));
+    ctx.stroke();
+    ctx.fillText(String(value), 6, y(value) + 4);
+  }
+  ctx.fillText(String(first), left, height - 12);
+  ctx.textAlign = "right";
+  ctx.fillText(`${last} cycle`, right, height - 12);
+  ctx.textAlign = "left";
+  ctx.beginPath();
+  rows.forEach((row, i) =>
+    i ? ctx.lineTo(x(row), y(row.upper)) : ctx.moveTo(x(row), y(row.upper)),
+  );
+  [...rows].reverse().forEach((row) => ctx.lineTo(x(row), y(row.lower)));
+  ctx.closePath();
+  ctx.fillStyle = "rgba(0, 128, 117, 0.13)";
+  ctx.fill();
+  for (const [key, color] of [
+    ["prediction", "#008075"],
+    ["true_rul", "#ba4a32"],
+  ]) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    rows.forEach((row, i) =>
+      i ? ctx.lineTo(x(row), y(row[key])) : ctx.moveTo(x(row), y(row[key])),
+    );
+    ctx.stroke();
+  }
+}
+addEventListener(
+  "resize",
+  () => benchmarkEngine && drawBenchmark(benchmarkEngine),
+);
 
 document
   .querySelectorAll("[data-view]")

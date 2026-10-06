@@ -2,19 +2,19 @@
 build_enhanced_dataset.py
 -------------------------
 원본 라벨링 JSON(zip)에서 '버려졌던' 필드까지 모두 추출해 강화 데이터셋을 만든다.
-- 공식 split 사용: Training(TL_) -> train, Validation(VL_) -> val  (데이터 누수 0)
+- 공식 split 사용: Training(TL_) -> train, Validation(VL_) -> val. 자산 중복 검증.
 - zip을 디스크에 풀지 않고 메모리 스트리밍으로 파싱
 - 동적 센서 7개는 30시점 시퀀스로, 정적/누적/맥락 피처 9개는 윈도우 끝 값으로 부착
 
-출력: data/processed/enhanced_{train,val}.npz  (X seq, S static, y)
+출력: --out-dir의 enhanced_{train,val}.npz (X, S, y, groups, target_times)
 """
-import os, sys, glob, zipfile, json
+import argparse
+import os, glob, zipfile, json
+from pathlib import Path
 import numpy as np
 import pandas as pd
 from collections import defaultdict
 
-BASE = r"C:\Users\SSAFY\Downloads\42.실내공간 유지관리 서비스 로봇 데이터\3.개방데이터\1.데이터"
-OUT = "../data/processed"
 WIN = 30
 CROWD = {"LOW": 0, "MIDDLE": 1, "HIGH": 2}
 
@@ -61,6 +61,8 @@ def parse_record(d):
 
 def read_split(folder, tag):
     zips = sorted(glob.glob(os.path.join(folder, "*.zip")))
+    if not zips:
+        raise FileNotFoundError(f"no AI-Hub JSON archives in {folder}")
     by_dev = defaultdict(list)
     devtypes, mainstates = set(), set()
     n = 0
@@ -82,11 +84,21 @@ def read_split(folder, tag):
     return by_dev, devtypes, mainstates
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Build robot windows with asset identity audit.")
+    parser.add_argument("--base-dir", required=True, type=Path,
+                        help="AI-Hub directory containing Training and Validation")
+    parser.add_argument("--out-dir", type=Path,
+                        default=Path(__file__).resolve().parents[1] / "data/datasets/robot-v2")
+    args = parser.parse_args(argv)
+    BASE, OUT = str(args.base_dir), str(args.out_dir)
     print("== Training 추출 ==", flush=True)
     tr_dev, dt1, ms1 = read_split(os.path.join(BASE, "Training", "02.라벨링데이터"), "train")
     print("== Validation 추출 ==", flush=True)
     va_dev, dt2, ms2 = read_split(os.path.join(BASE, "Validation", "02.라벨링데이터"), "val")
+    overlap = set(tr_dev) & set(va_dev)
+    if overlap:
+        raise ValueError(f"official asset overlap: {sorted(map(str, overlap))[:5]}")
 
     # 인코더(두 split 공통)
     devtype_map = {v: i for i, v in enumerate(sorted(dt1 | dt2))}
@@ -102,9 +114,11 @@ def main():
     print("deviceType:", devtype_map, "| mainState 수:", len(mainstate_map), flush=True)
 
     def build(by_dev, capture_display=False):
-        Xs, Ss, ys = [], [], []
+        Xs, Ss, ys, groups, target_times = [], [], [], [], []
         disp = []  # (robot, x, y, degree) at target frame — 대시보드 재생용
         for dev, recs in by_dev.items():
+            if not dev:
+                raise ValueError("deviceId is required for asset-separated evaluation")
             recs.sort(key=lambda r: r["createdAt"])
             if len(recs) <= WIN:
                 continue
@@ -117,25 +131,32 @@ def main():
                 ms = mainstate_map.get(end["mainState"], 0)
                 Ss.append(np.concatenate([stat[i + WIN], [dtv, ms]]))
                 ys.append(err_map[end["errorCode"]])
+                groups.append(str(dev))
+                target_times.append(str(end["createdAt"]))
                 if capture_display:
                     disp.append((dev, end["deviceType"], end["x"], end["y"],
                                  end["degree"], end["errorCode"]))
-        out = (np.asarray(Xs, dtype=np.float32),
-               np.asarray(Ss, dtype=np.float32),
-               np.asarray(ys, dtype=np.int64))
+        out = (np.asarray(Xs, dtype=np.float32).reshape(-1, WIN, len(DYN)),
+               np.asarray(Ss, dtype=np.float32).reshape(-1, 9),
+               np.asarray(ys, dtype=np.int64), np.asarray(groups, dtype=str),
+               np.asarray(target_times, dtype=str))
         return (out + (disp,)) if capture_display else out
 
-    Xtr, Str, ytr = build(tr_dev)
-    Xva, Sva, yva, disp = build(va_dev, capture_display=True)
+    Xtr, Str, ytr, Gtr, Ttr = build(tr_dev)
+    Xva, Sva, yva, Gva, Tva, disp = build(va_dev, capture_display=True)
+    if not len(ytr) or not len(yva):
+        raise ValueError("both splits must contain sensor windows")
     print(f"train: X{Xtr.shape} S{Str.shape} y{ytr.shape}", flush=True)
     print(f"val:   X{Xva.shape} S{Sva.shape} y{yva.shape}", flush=True)
 
     os.makedirs(OUT, exist_ok=True)
-    np.savez_compressed(f"{OUT}/enhanced_train.npz", X=Xtr, S=Str, y=ytr)
-    np.savez_compressed(f"{OUT}/enhanced_val.npz", X=Xva, S=Sva, y=yva)
+    np.savez_compressed(f"{OUT}/enhanced_train.npz", X=Xtr, S=Str, y=ytr, groups=Gtr, target_times=Ttr)
+    np.savez_compressed(f"{OUT}/enhanced_val.npz", X=Xva, S=Sva, y=yva, groups=Gva, target_times=Tva)
     json.dump({"err_map": err_map, "devtype_map": devtype_map,
                "mainstate_map": mainstate_map, "crowd_map": CROWD,
-               "dyn": DYN, "stat": STAT_NUM + ["deviceType", "mainState"]},
+               "dyn": DYN, "stat": STAT_NUM + ["deviceType", "mainState"],
+               "window_contract": {"history": "30 observations before target", "context": "at target time"},
+               "asset_audit": {"train": sorted(map(str, tr_dev)), "validation": sorted(map(str, va_dev)), "overlap": 0}},
               open(f"{OUT}/enhanced_meta.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
     # 대시보드 재생용: val 윈도우와 1:1 정렬된 표시정보(enhanced_val.npz와 index 동일)

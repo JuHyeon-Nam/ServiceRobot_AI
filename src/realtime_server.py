@@ -33,6 +33,7 @@ from pdm_runtime import load_runtime, predict_window, synthesize_live_window
 from reviewer_brief import build_reviewer_brief
 from rul_runtime import attach_rul_model_slot, load_rul_baseline_metadata, rul_calibration_contract, rul_readiness_report
 from work_order_store import WorkOrderStore, priority_for, sla_seconds_for
+from benchmark_registry import load_report as load_benchmark_report, summary as benchmark_summary
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(_HERE, "..", "data", "processed")
@@ -549,6 +550,26 @@ def api_phm(agv: str = None):
         "max_risk_score": max((r["phm"]["risk_score"] for r in rows), default=0),
     }
     return JSONResponse({"schema": "fab.phm.forecast.v1", "summary": summary, "assets": rows})
+
+
+@app.get("/api/benchmarks/rul")
+def api_rul_benchmark():
+    try:
+        return JSONResponse(benchmark_summary(load_benchmark_report()))
+    except (OSError, ValueError, KeyError, TypeError):
+        return JSONResponse({"available": False, "reason": "benchmark_report_unavailable"})
+
+
+@app.get("/api/benchmarks/rul/engines/{unit}")
+def api_rul_benchmark_engine(unit: int):
+    try:
+        report = load_benchmark_report()
+    except (OSError, ValueError, KeyError, TypeError):
+        return JSONResponse({"error": "benchmark_report_unavailable"}, status_code=503)
+    engine = next((row for row in report["engines"] if row["unit"] == unit), None)
+    if engine is None:
+        return JSONResponse({"error": "engine_not_found"}, status_code=404)
+    return JSONResponse({"dataset": report["dataset"], "target_unit": "cycles", **engine})
 
 
 @app.get("/api/rul-contract")

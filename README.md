@@ -44,6 +44,7 @@ AI-Hub 서비스 로봇 데이터를 활용한 상태진단 시스템. LightGBM 
 | 정비 작업 | 접수 → 점검 → 조치 완료 → 종결. 동일 고장 중복 억제, 정상 복귀 후 재발 시 신규 작업 생성. |
 | 이력·리포트 | SQLite 이벤트 저장, 자산별 이력·CSV·추세·운영/인수인계 리포트 제공. |
 | 데이터·AI | 입력 출처, 데이터 품질, 분포 변화, 모델 카드와 검증 지표 조회. |
+| RUL 벤치마크 | NASA FD001 테스트 엔진 100대의 예측·정답·구간 비교. 엔진 선택과 시계열 그래프 제공. |
 | 연결·화면 | WebSocket 재접속·HTTP 폴링 대체, 갱신 경과 표시, 데스크톱·태블릿·모바일 대응. |
 
 ## 기술 스택
@@ -133,6 +134,25 @@ flowchart LR
 
 [모델 카드](docs/MODEL_CARD.md) · [클래스별 F1](assets/per_class_f1.png) · [Confusion matrix](assets/confusion_matrix.png) · [특징 중요도](assets/feature_importance.png)
 
+### 공개 데이터 잔여수명 예측
+
+NASA C-MAPSS FD001 엔진 열화 시뮬레이션으로 학습형 RUL 평가 수행. 로봇 진단과 별도 실험이며, cycle을 AGV의 분 단위 수명으로 변환하지 않음.
+
+| 공식 테스트 엔진 100대 · 마지막 관측 시점 | 중앙값 기준선 | LightGBM |
+|---|---:|---:|
+| MAE · cycle | 39.08 | **14.38** |
+| RMSE · cycle | 49.82 | **18.73** |
+| 90% 목표 예측 구간 포함률 | 해당 없음 | **94%** |
+| 평균 예측 구간 폭 · cycle | 해당 없음 | 65.97 |
+
+단순 기준선 대비 MAE 63.2% 감소. 학습 엔진 내부에서 후보 선택, 독립 엔진 20대로 구간 보정, 공식 테스트 정답 상한 없이 평가. 선택 모델은 현재 센서값 기반 LightGBM. AGV 운영 PHM은 기존 규칙 기반 유지.
+
+[실험 절차·한계·재현](docs/benchmarks/README.md) · [결과 그래프](assets/rul_benchmark.png) · [원본 결과 JSON](docs/benchmarks/cmapss_fd001.json) · [고도화 계획](docs/ML_UPGRADE_PLAN.md)
+
+### 진단 재학습
+
+로봇별 holdout, class weighting 후보 3개, 오탐·미탐·확률 신뢰도 평가 추가. 실험 출력과 운영 모델 분리, 자동 승격 제외. 기존 93.29% / 0.5838은 저장된 모델의 지표이며 이번 작업에서 재학습하지 않음. AI-Hub 원본 또는 장치 ID를 보존한 NPZ 확보 후 재학습 가능.
+
 ## 설계 및 검증 범위
 
 | 설계 항목 | 적용 내용 |
@@ -141,6 +161,7 @@ flowchart LR
 | 데이터 추적 | `replay_model` / `demo_scenario` / `edge_ingest` 출처 저장. MQTT 전달·CSV·TSDB export에도 출처 유지. |
 | 정비 사건 관리 | 동일 고장 작업 중복 억제, 정상 복귀 후 재발 구분. SQLite에 사건 상태 저장. |
 | RUL 평가 | 자산 단위 holdout, 중앙값 기준선 비교, 독립 고장 사건 집계. 수동 시연 데이터 제외. |
+| 공개 PHM 실험 | NASA 엔진별 fit·선택·보정 분리, 인과적 특징, 공식 테스트 RUL 평가·구간 공개. |
 | 연결 복구 | WebSocket 재접속과 HTTP 폴링 대체. 마지막 데이터 갱신 경과 표시. |
 | 화면 검증 | 실제 WebGL 픽셀·프레임 변화, 자산 클릭, 상태 전환, 정비 작업, 반응형 검사. |
 
@@ -151,6 +172,7 @@ flowchart LR
 | 수동 시나리오 | 상태를 강제해 화면·정비 흐름 재현. 모델 신뢰도 표시 제외. |
 | 외부 입력 | 센서·위치·보고 진단 반영. 어댑터의 기본 진단은 임계값 규칙 사용. |
 | PHM·RUL | 운영 화면은 건전도·추세·센서 기반 규칙. RUL 데이터 생성·회귀 학습은 오프라인 파이프라인으로 제공. |
+| NASA 벤치마크 | 공개 엔진 시뮬레이션의 학습 결과. 데이터·AI 탭에서 저장된 결과 조회; AGV 운영 추론에는 미적용. |
 | 3D·운영 지표 | 가상 FAB 시각화와 시뮬레이션 관측 지표. 실제 속도·물리 모델·생산 KPI 보정은 후속 검증 범위. |
 
 기본 화면의 진동·온도는 관제용 합성 신호이며 LightGBM 동적 입력에 포함되지 않음. 3D 점검 근거는 코드별 점검 항목, `/predict` 설명은 모델 기여도 기반. 현장 PHM 적용에는 실제 고장 시각 라벨·장비·MQTT 통합 검증 필요.
@@ -202,6 +224,18 @@ docker compose up --build
 docker compose --profile mqtt-smoke up --build
 ```
 
+### 공개 RUL 실험
+
+`requirements.txt` 설치 후 저장소 루트에서 실행. 원본 데이터는 로컬 `data/external/`에 저장하며 Git에 포함하지 않음.
+
+```bash
+python scripts/download_cmapss.py
+python src/cmapss_benchmark.py --seed 42 --lookback 20 --rounds 350
+python scripts/plot_rul_benchmark.py
+```
+
+로봇 데이터 재구성·후보 학습 명령은 [고도화 계획](docs/ML_UPGRADE_PLAN.md#로봇-재학습-명령)에 정리.
+
 ## API
 
 관제 서버 `:8000`과 추론 서버 `:8001`로 구분.
@@ -218,12 +252,14 @@ docker compose --profile mqtt-smoke up --build
 | 관제 | `GET /api/data-quality`, `GET /api/drift` | 데이터 품질·분포 변화 조회 |
 | 관제 | `GET /api/model-card`, `GET /api/data-source` | 모델 정보·데이터 출처 조회 |
 | 관제 | `GET /api/rul-contract` | RUL 계약·데이터 준비도·오프라인 모델 메타데이터 |
+| 관제 | `GET /api/benchmarks/rul` | 공개 RUL 실험 요약·데이터 출처·평가 절차 |
+| 관제 | `GET /api/benchmarks/rul/engines/{unit}` | 테스트 엔진별 예측·정답·구간 이력 |
 | 관제 | `GET /api/shift-handover?fmt=md` | 인수인계 리포트 |
 | 관제 | `GET /metrics` | Prometheus 운영 지표 |
 
 ## 테스트
 
-**검증 기록: 2026-10-02 · Python 104개 통과 · 브라우저 6개 화면 크기 검증.**
+**검증 기록: 2026-10-07 · Python 134개 통과 · 브라우저 6개 화면 크기 검증.**
 
 ```bash
 pip install -r requirements.txt
@@ -238,7 +274,7 @@ npx playwright install chromium
 CHROME_CHANNEL=chromium TWIN_URL=http://127.0.0.1:8000 npm run test:ui
 ```
 
-360~1920px 화면에서 렌더링·클릭·움직임·4단계 상태·정비 처리·WebSocket 차단 시 폴링 복구 확인. 시연 설정은 복원하나 정비 이력은 남으므로 별도 테스트 서버 권장.
+360~1920px 화면에서 렌더링·클릭·움직임·4단계 상태·정비 처리·RUL 엔진 선택 및 그래프 픽셀·WebSocket 차단 시 폴링 복구 확인. 시연 설정은 복원하나 정비 이력은 남으므로 별도 테스트 서버 권장.
 
 GitHub Actions에 Python 테스트·Docker smoke 작업 구성. 브라우저 검증은 로컬 수행, [CI 확장 예제](docs/ci-workflow-with-browser.example.yml) 제공. 최신 UI 변경의 로컬 Docker 실행은 별도 재검증 필요.
 
@@ -248,6 +284,9 @@ GitHub Actions에 Python 테스트·Docker smoke 작업 구성. 브라우저 검
 |---|---|
 | `src/build_enhanced_dataset.py` | 원본 JSON·30시점 구간 생성 |
 | `src/train_enhanced.py`, `src/evaluate_enhanced.py` | LightGBM 학습·공식 Validation 평가 |
+| `src/train_diagnosis.py`, `src/diagnosis_evaluation.py` | 로봇 holdout·가중치 후보·오탐/미탐·승격 조건 |
+| `src/cmapss_benchmark.py`, `src/benchmark_registry.py` | 공개 엔진 RUL 학습·보고서 계약 |
+| `scripts/download_cmapss.py`, `scripts/plot_rul_benchmark.py` | 공식 데이터 확보·측정 결과 시각화 |
 | `src/pdm_runtime.py`, `src/app.py` | 공통 추론 런타임·추론 API |
 | `src/realtime_server.py`, `src/demo_runtime.py` | 상태 스트림·PHM·시연 제어 |
 | `src/static/twin*`, `src/fab_layout.py` | 3D 관제·자산 상세·레이아웃 |
