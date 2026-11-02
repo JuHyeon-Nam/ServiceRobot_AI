@@ -1,6 +1,42 @@
 # 모델·운영 고도화 계획
 
-기준일: 2026-10-07. 기존 진단·3D·정비 시스템을 유지하면서 검증 가능한 학습형 PHM 근거와 운영 신뢰성 확장. 작업량 기준 7단계, 약 3~7일의 추가 개발 범위. 아래 미완료 항목은 예약 실행이나 완료 약속이 아닌 후속 작업 계획.
+최초 기준일: 2026-10-07. 최근 갱신: 2026-11-02. 기존 진단·3D·정비 시스템을 유지하면서 검증 가능한 학습형 PHM 근거와 운영 신뢰성 확장. 아래 미완료 항목은 완료 약속이 아닌 후속 작업 계획. 실제 진단 성능 개선에는 원본 데이터 확보와 재평가 필요.
+
+## 진단 검색 개선 (2026-11-02)
+
+정상 언더샘플링과 클래스 가중치의 효과를 분리하기 위한 비교 절차 구현. 이전 코드는 무가중치 후보만 정상 최대 3배로 줄이고 가중치 후보는 전체 학습 표본을 사용해 두 조건의 효과가 함께 바뀌는 구조. 현재는 다음 두 축을 같은 로봇 holdout에서 조합해 총 12개 후보 비교.
+
+| 비교 축 | 조건 |
+|---|---|
+| 정상 표본 | 전체 유지, 고장 표본 총합의 최대 2배·3배·5배 |
+| 가중치 | `unweighted`, `sqrt_balanced`, `balanced` |
+| 공통 조건 | 동일 fit/selection 로봇, seed, 249개 특징, LightGBM 설정 |
+| 후보 선택 | 정상 오탐률 제한을 만족하는 후보 중 선택 Macro-F1 최대 |
+| 공식 Validation | 후보 선택 후 선택된 후보와 기존 모델의 최종 비교에만 사용 |
+
+샘플링은 fit 부분의 정상 표본에만 적용. 모든 고장 표본 유지, 선택·공식 검증 데이터는 원래 분포 유지. 비율은 상한이므로 정상 표본이 이미 적으면 추가 생성하지 않음. 기본 seed는 42이며, seed를 고정한다고 다른 데이터나 환경에서 동일 성능을 보장하는 것은 아님.
+
+학습과 선택 양쪽에 모든 클래스가 존재하도록 로봇 단위 분할 검사 강화. 한 클래스가 로봇 한 대에만 있으면 중단. 각 클래스가 두 대 이상에 있더라도 64회 분할 시도에서 완전한 클래스 구성을 찾지 못하면 중단하므로 자산 분포 검토 필요. 같은 로봇의 윈도를 양쪽에 나누어 우회하지 않음.
+
+| 산출물 | 기록 내용 |
+|---|---|
+| `experiment_report.json` | 12개 후보의 클래스별 precision/recall/F1/support·혼동행렬·오탐·미탐, 선택 후보와 기존 모델의 공식 평가, 분할별 클래스 표본 수·독립 로봇 수 |
+| `training_events.jsonl` | 실행 시작, 후보 시작·완료·실패, 전체 완료. 완료된 후보 결과는 후속 실패 시에도 보존 |
+| `selection_results.csv` | 후보별 샘플링·가중치·학습 표본 수·Accuracy·Macro-F1·오탐·미탐 비교표 |
+| 모델·메타데이터 | 선택된 후보만 별도 출력. 운영 모델 변경 없음 |
+
+보고서에 입력 NPZ·인코딩 메타·기존 모델·학습 코드의 SHA256 및 Python/NumPy/pandas/LightGBM/scikit-learn 버전 기록. 출력 폴더가 비어 있지 않으면 중단하여 이전 결과 보존. `data_kind`는 호출자가 선언한 출처이며 독립적인 진위 검증이 아님. `synthetic_fixture`·`unspecified` 실행은 승격 검토 대상에서 제외. 선택 오탐 제한을 만족하는 후보가 없어도 검토 대상에서 제외하며 자동 승격은 모든 경우 비활성.
+
+**실행 검증 범위:** 불균형 합성 fixture에서 12개 조합 학습·저장, 실제 샘플링 표본 수, 검증 호출 순서, 실패 기록 보존, 재실행 덮어쓰기 차단, 운영 모델 바이트 불변성 테스트. 실제 AI-Hub ZIP/NPZ는 현재 환경에 없어 원본 재학습 미수행. **공식 Accuracy 0.9329 / Macro-F1 0.5838은 변경 없음.** 이번 절차 구현을 과거 SMOTE 또는 2·3·5배 실험의 실행 증거로 소급하지 않음.
+
+2026-11-02 검증: `python -m pytest -q tests/test_diagnosis_search.py tests/test_ml_upgrade.py` 52개 통과, `python -m pytest -q tests` 전체 158개 통과. 테스트 통과 수는 파이프라인 검증 결과이며 모델 성능 지표가 아님.
+
+후속 우선순위:
+
+1. AI-Hub 원본 복원, 장치 ID·인코딩 호환성과 클래스별 독립 로봇 수 확인.
+2. 원본으로 동일 조건 검색 실행. 부족한 고장 자산은 별도 수집하거나 평가 한계로 기록.
+3. 학습 데이터 내 여러 로봇 분할·seed로 선택 안정성 확인. 공식 Validation에 맞춘 반복 튜닝 금지.
+4. 독립 보정 데이터의 확률 보정, 클래스별 미탐 분석과 최종 공식 평가. Macro-F1뿐 아니라 오탐·미탐·희소 클래스 성능 동시 확인.
 
 ## 이번 작업 완료
 
@@ -11,7 +47,7 @@
 | 불확실성 | 독립 엔진 보정·split-conformal 구간 | 목표 90%, 테스트 포함률 94%, 평균 폭 65.97 cycle |
 | 결과 화면 | 엔진 100대 선택, 예측·정답·구간 그래프, API | AGV 실시간 PHM과 분리 |
 | 로봇 데이터 | 장치 ID·목표 시각 보존, 공식 split 자산 중복 차단 | 작은 ZIP fixture로 생성·분리 검증 |
-| 진단 학습 | 로봇 holdout 선택, 가중치 후보 3개, 공통 249-feature | 합성 fixture로 실행 검증; 원본 데이터 재학습 미수행 |
+| 진단 학습 | 로봇 holdout 선택, 샘플링 4종 × 가중치 3종, 공통 249-feature | 합성 fixture로 12개 조합 실행 검증; 원본 데이터 재학습 미수행 |
 | 진단 평가 | 클래스별 recall/F1·오탐·미탐·ECE·승격 조건 | Macro-F1 단독 또는 Accuracy 단독 승격 방지 |
 | 운영 모델 보호 | 실험 경로 분리, 인코딩 계약 확인, 자동 승격 금지 | 기존 모델 유지 |
 
@@ -35,9 +71,11 @@
 
 ```bash
 python src/build_enhanced_dataset.py --base-dir /path/to/AI-Hub --out-dir data/datasets/robot-v2
-python src/train_diagnosis.py --data-dir data/datasets/robot-v2 --output data/experiments/diagnosis-v2
-python src/evaluate_enhanced.py --data-dir data/datasets/robot-v2 --model-dir data/experiments/diagnosis-v2 --report data/experiments/diagnosis-v2/evaluation.json
+python src/train_diagnosis.py --data-dir data/datasets/robot-v2 --output data/experiments/diagnosis-run-001 --data-kind aihub_recorded --normal-ratios 0 2 3 5
+python src/evaluate_enhanced.py --data-dir data/datasets/robot-v2 --model-dir data/experiments/diagnosis-run-001 --report data/experiments/diagnosis-run-001/evaluation.json
 ```
+
+원본 AI-Hub 데이터임을 확인한 경우에만 `--data-kind aihub_recorded` 사용. `--normal-ratios 0`은 전체 정상 유지이며, `--weight-modes unweighted`로 샘플링 효과만 비교 가능. 실행마다 새 출력 폴더 사용. 합성 테스트 결과를 실제 성능 근거로 사용하지 않음.
 
 기존 `train_enhanced.py` 진입점은 새 파이프라인 호출. `groups` 없는 기존 NPZ는 로봇 단위 평가를 증명할 수 없어 재생성 필요. 공식 train/validation에 같은 장치가 있으면 중단하고 분할 정책을 검토. 입력 인코딩이 운영 모델과 다르면 비교 중단; 데이터셋/모델 버전별 동일 인코딩으로 재구성 필요.
 

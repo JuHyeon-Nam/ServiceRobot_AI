@@ -205,28 +205,88 @@ def test_dataset_builder_preserves_asset_identity(tmp_path):
         main(["--base-dir", str(tmp_path), "--out-dir", str(out)])
 
 
-def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path):
+def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path, monkeypatch):
+    import train_diagnosis
     champion = ROOT / "data/processed"
     before = (champion / "robot_pdm_enhanced.txt").read_bytes()
     meta = json.loads((champion / "enhanced_meta.json").read_text())
     classes = len(meta["err_map"])
+    normal = meta["err_map"]["정상"]
     rng = np.random.default_rng(7)
+    per_asset = np.repeat(np.arange(classes), [200 if i == normal else 4 for i in range(classes)])
     for split, offset in [("train", 0), ("val", 100)]:
-        groups = np.repeat(np.arange(12) + offset, classes * 10).astype(str)
-        labels = np.tile(np.repeat(np.arange(classes), 10), 12)
+        groups = np.repeat(np.arange(12) + offset, len(per_asset)).astype(str)
+        labels = np.tile(per_asset, 12)
         raw = rng.normal(size=(len(labels), 30, 7)).astype(np.float32)
         raw[:, :, 0] += labels[:, None] * 10
         np.savez(tmp_path / f"enhanced_{split}.npz", X=raw, S=np.zeros((len(labels), 9)), y=labels, groups=groups)
     (tmp_path / "enhanced_meta.json").write_text(json.dumps(meta))
-    report = train_candidates(tmp_path, tmp_path / "candidate", champion, rounds=2)
-    assert len(report["experiments"]) == 3
+    evaluated_rows = []
+
+    def track_metrics(y, probabilities, names):
+        evaluated_rows.append(len(y))
+        return classification_metrics(y, probabilities, names)
+
+    monkeypatch.setattr(train_diagnosis, "classification_metrics", track_metrics)
+    output = tmp_path / "candidate"
+    report = train_candidates(tmp_path, output, champion, rounds=2, data_kind="synthetic_fixture")
+    assert len(report["experiments"]) == 12
+    assert report["schema"] == "servicerobot.diagnosis.experiment.v2"
+    assert report["lineage"]["data_kind"] == "synthetic_fixture"
+    assert len(report["lineage"]["champion_sha256"]) == 64
+    assert len(pd.read_csv(output / "selection_results.csv")) == 12
+    events = [json.loads(line) for line in (output / "training_events.jsonl").read_text().splitlines()]
+    assert events[0]["event"] == "run_started"
+    assert events[-1]["event"] == "run_completed"
+    assert sum(row["event"] == "candidate_completed" for row in events) == 12
+    assert all(row["selection_metrics"]["class_coverage"] == classes for row in report["experiments"])
+    assert {row["normal_ratio"] for row in report["experiments"]} == {None, 2, 3, 5}
+    assert {row["mode"] for row in report["experiments"]} == {"unweighted", "sqrt_balanced", "balanced"}
+    fit_support = report["dataset_support"]["fit"]
+    faults = sum(value["rows"] for key, value in fit_support.items() if key != "정상")
+    normals = fit_support["정상"]["rows"]
+    for row in report["experiments"]:
+        ratio = row["normal_ratio"]
+        expected_normals = normals if ratio is None else min(normals, faults * ratio)
+        assert row["rows"] == faults + expected_normals
+    selection_rows = sum(value["rows"] for value in report["dataset_support"]["selection"].values())
+    assert evaluated_rows == [selection_rows] * 12 + [len(labels)] * 2
+    assert "data_provenance_not_recorded_aihub" in report["promotion"]["reasons"]
+    assert not report["promotion"]["eligible"]
     assert not report["official_validation_used_for_selection"]
     assert not report["promotion"]["automatic_promotion"]
     assert not set(report["split_audit"]["fit_assets"]) & set(report["split_audit"]["selection_assets"])
     assert before == (champion / "robot_pdm_enhanced.txt").read_bytes()
     with pytest.raises(ValueError, match="overwrite"):
         train_candidates(tmp_path, champion, champion)
+    with pytest.raises(ValueError, match="empty"):
+        train_candidates(tmp_path, output, champion, rounds=2)
+
+    def forced_false_alarms(y, probabilities, names):
+        result = classification_metrics(y, probabilities, names)
+        result["normal_false_alarm_rate"] = .1
+        return result
+
+    monkeypatch.setattr(train_diagnosis, "classification_metrics", forced_false_alarms)
+    monkeypatch.setattr(train_diagnosis, "promotion_gate", lambda *args: {
+        "eligible": True, "reasons": [], "automatic_promotion": False})
+    constrained = train_candidates(tmp_path, tmp_path / "constrained", champion, rounds=2,
+                                   normal_ratios=(3,), weight_modes=("unweighted",), data_kind="synthetic_fixture")
+    assert not constrained["selection_constraint_met"]
+    assert not constrained["promotion"]["eligible"]
+    assert "selection_false_alarm_limit" in constrained["promotion"]["reasons"]
+
+    def failed_fit(*args, **kwargs):
+        raise RuntimeError("fixture training failure")
+
+    monkeypatch.setattr(train_diagnosis.lgb.LGBMClassifier, "fit", failed_fit)
+    with pytest.raises(RuntimeError, match="fixture training failure"):
+        train_candidates(tmp_path, tmp_path / "failed", champion, rounds=2, data_kind="synthetic_fixture")
+    failed_events = [json.loads(line) for line in (tmp_path / "failed/training_events.jsonl").read_text().splitlines()]
+    assert failed_events[-1]["event"] == "candidate_failed"
+    assert failed_events[-1]["error_type"] == "RuntimeError"
+    assert not (tmp_path / "failed/experiment_report.json").exists()
     meta["devtype_map"] = {"incompatible": 999}
     (tmp_path / "enhanced_meta.json").write_text(json.dumps(meta))
     with pytest.raises(ValueError, match="encoding"):
-        train_candidates(tmp_path, tmp_path / "candidate", champion, rounds=2)
+        train_candidates(tmp_path, tmp_path / "incompatible-candidate", champion, rounds=2)

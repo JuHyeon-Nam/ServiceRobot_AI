@@ -41,17 +41,23 @@ def classification_metrics(y: np.ndarray, probabilities: np.ndarray, names: list
 
 
 def asset_holdout(labels: np.ndarray, groups: np.ndarray, seed: int = 42,
-                  test_size: float = 0.2) -> tuple[np.ndarray, np.ndarray]:
+                  test_size: float = 0.2, require_all_classes: bool = False) -> tuple[np.ndarray, np.ndarray]:
     labels, groups = np.asarray(labels), np.asarray(groups).astype(str)
     if len(labels) != len(groups) or any(not group.strip() for group in groups):
         raise ValueError("every row needs a nonempty asset ID")
     if len(np.unique(groups)) < 3:
         raise ValueError("diagnosis selection requires at least 3 independent assets")
     expected = set(labels.tolist())
+    if require_all_classes:
+        single_asset = [int(label) for label in expected if len(np.unique(groups[labels == label])) < 2]
+        if single_asset:
+            raise ValueError(f"classes need at least 2 independent assets for holdout: {single_asset}")
     for attempt in range(64):
         fit, selection = next(GroupShuffleSplit(n_splits=1, test_size=test_size,
                                                 random_state=seed + attempt).split(labels, groups=groups))
-        if set(labels[fit].tolist()) == expected and len(np.unique(labels[selection])) > 1:
+        coverage = set(labels[selection].tolist())
+        selection_valid = coverage == expected if require_all_classes else len(coverage) > 1
+        if set(labels[fit].tolist()) == expected and selection_valid:
             return fit, selection
     raise ValueError("holdout cannot preserve classes; more independent fault assets are needed")
 
