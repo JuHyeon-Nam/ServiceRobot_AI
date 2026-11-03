@@ -1,6 +1,29 @@
 # 모델·운영 고도화 계획
 
-최초 기준일: 2026-10-07. 최근 갱신: 2026-11-02. 기존 진단·3D·정비 시스템을 유지하면서 검증 가능한 학습형 PHM 근거와 운영 신뢰성 확장. 아래 미완료 항목은 완료 약속이 아닌 후속 작업 계획. 실제 진단 성능 개선에는 원본 데이터 확보와 재평가 필요.
+최초 기준일: 2026-10-07. 최근 갱신: 2026-11-03. 기존 진단·3D·정비 시스템을 유지하면서 검증 가능한 학습형 PHM 근거와 운영 신뢰성 확장. 아래 미완료 항목은 완료 약속이 아닌 후속 작업 계획. 실제 진단 성능 개선에는 원본 데이터 확보와 재평가 필요.
+
+## 학습 전 사전 점검 (2026-11-03)
+
+`train_diagnosis.py --preflight-only` 추가. 모델 학습·추론 및 전체 249-feature 행렬 생성 없이 입력 파일과 로봇 분할 가능성 점검. 원본 NPZ 배열은 메모리에 로딩하며 센서 유효성 검사는 4,096개 행씩 수행. 로봇 ID 문자열 검증·메타데이터 계약·클래스 범위/완전성 검사는 실제 학습 경로에서도 같은 함수를 사용.
+
+| 검사 | 중단 조건 |
+|---|---|
+| 필수 파일 | 학습·검증 NPZ, 인코딩 메타, 기존 모델·메타 중 누락 |
+| 센서 배열 | `X=(n,30,7)`, `S=(n,9)` 불일치, 비숫자·NaN·무한대·float32 변환 오버플로 |
+| 라벨 | 정수형 1차원 배열이 아님, 행 수 불일치, 미등록 클래스 또는 선언된 클래스 누락 |
+| 로봇 ID | 숫자형/결측 배열, 빈 문자열, 앞뒤 공백, `None`·`null`·`NaN`·`NaT` 문자열 |
+| 모델 계약 | 인코딩·클래스 순서·249-feature 메타 계약 불일치 |
+| 분할 | 공식 split의 로봇 중복 또는 모든 클래스를 포함하는 독립 로봇 holdout 구성 불가 |
+
+보고서에 파일별 존재 여부, 클래스별 윈도 표본 수와 독립 로봇 수, 로봇 중복 수, 사용 가능한 fit/selection 계획, 문제 목록과 UTC 점검 시각 기록. `ready_for_candidate_comparison=true`는 입력·분할 사전조건 충족만 의미. 데이터 출처 진위, 저장 Booster 내용, 공학 특징의 계산 결과, 현장 성능은 검증하지 않음. `model_performance_evaluated=false`로 구분.
+
+```bash
+python src/train_diagnosis.py --data-dir data/datasets/robot-v2 --preflight-only --preflight-report data/experiments/diagnosis-readiness-run-001.json
+```
+
+종료 코드 0은 사전조건 충족, 2는 준비 미완료 또는 보고서 저장 오류. 준비 미완료 시에도 JSON 보고서는 저장. 기존 파일에는 덮어쓰지 않으므로 매번 새 보고서 경로 사용. `--preflight-report`는 `--preflight-only`와 함께 사용. 원본이 없는 현재 `data/processed`를 점검하면 `enhanced_train.npz`·`enhanced_val.npz` 누락 2건과 준비 불가 상태를 반환.
+
+2026-11-03 검증: 합성 배열 기반 사전 점검 테스트 37개 추가, 전체 195개 테스트 통과. 모델 학습·추론·전체 특징 생성 미호출, 숫자/결측 로봇 ID 차단, 마지막 검사 배치의 비정상 센서값, 클래스 누락 시 학습 전 중단, 준비 미완료 보고서 보존 및 파일 덮어쓰기 거부 확인. 기존 운영 모델·UI 변경 없음. 실제 AI-Hub 재학습은 미수행이며 Accuracy 0.9329 / Macro-F1 0.5838 유지.
 
 ## 진단 검색 개선 (2026-11-02)
 
@@ -71,6 +94,7 @@
 
 ```bash
 python src/build_enhanced_dataset.py --base-dir /path/to/AI-Hub --out-dir data/datasets/robot-v2
+python src/train_diagnosis.py --data-dir data/datasets/robot-v2 --preflight-only --preflight-report data/experiments/diagnosis-readiness-run-001.json
 python src/train_diagnosis.py --data-dir data/datasets/robot-v2 --output data/experiments/diagnosis-run-001 --data-kind aihub_recorded --normal-ratios 0 2 3 5
 python src/evaluate_enhanced.py --data-dir data/datasets/robot-v2 --model-dir data/experiments/diagnosis-run-001 --report data/experiments/diagnosis-run-001/evaluation.json
 ```

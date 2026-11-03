@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import platform
 import time
+import zipfile
 
 import lightgbm as lgb
 import numpy as np
@@ -23,21 +24,62 @@ WEIGHT_MODES = ("unweighted", "sqrt_balanced", "balanced")
 DATA_KINDS = ("unspecified", "aihub_recorded", "synthetic_fixture")
 
 
-def load_dataset(path: Path) -> dict:
+def load_dataset(path: Path, *, with_features: bool = True) -> dict:
     with np.load(path, allow_pickle=False) as data:
         if not {"X", "S", "y", "groups"} <= set(data.files):
             raise ValueError("dataset needs X/S/y/groups; rebuild with build_enhanced_dataset.py")
         rows = {key: data[key] for key in ("X", "S", "y", "groups")}
+    if rows["y"].ndim != 1:
+        raise ValueError("class labels must be a one-dimensional array")
     count = len(rows["y"])
     if not count or rows["y"].shape != (count,) or rows["groups"].shape != (count,):
         raise ValueError("invalid dataset row alignment")
     if not np.issubdtype(rows["y"].dtype, np.integer):
         raise ValueError("class labels must be integer indices")
-    rows["features"] = make_feature_matrix(rows["X"], rows["S"])
-    if len(rows["features"]) != count or any(not str(g).strip() for g in rows["groups"]):
-        raise ValueError("invalid features or asset IDs")
+    if rows["X"].shape != (count, 30, 7) or rows["S"].shape != (count, 9):
+        raise ValueError("sensor/context arrays must have shapes (n, 30, 7) and (n, 9)")
+    for key in ("X", "S"):
+        if rows[key].dtype.kind not in "iuf":
+            raise ValueError(f"{key} must contain numeric sensor values")
+        for start in range(0, count, 4096):
+            with np.errstate(over="ignore", invalid="ignore"):
+                batch = rows[key][start:start + 4096].astype(np.float32, copy=False)
+            if not np.isfinite(batch).all():
+                raise ValueError(f"{key} must be finite and representable as float32")
+    if rows["groups"].dtype.kind not in "US":
+        raise ValueError("asset IDs must be stored as strings, not numeric or missing values")
     rows["groups"] = rows["groups"].astype(str)
+    if any(not group.strip() or group != group.strip() or group.lower() in {"none", "null", "nan", "nat"}
+           for group in rows["groups"]):
+        raise ValueError("asset IDs must be nonempty, trimmed, and nonmissing")
+    if with_features:
+        rows["features"] = make_feature_matrix(rows["X"], rows["S"])
     return rows
+
+
+def validate_metadata_contract(metadata: dict, serving_dataset: dict, serving_model: dict) -> list[str]:
+    if not all(isinstance(value, dict) for value in (metadata, serving_dataset, serving_model)):
+        raise ValueError("metadata must be JSON objects")
+    for key in ("devtype_map", "mainstate_map", "crowd_map", "dyn", "stat"):
+        if key not in metadata or key not in serving_dataset or metadata[key] != serving_dataset[key]:
+            raise ValueError(f"champion and candidate encoding contracts differ: {key}")
+    mapping = metadata.get("err_map")
+    if (not isinstance(mapping, dict) or not mapping or "정상" not in mapping
+            or any(not isinstance(value, int) or isinstance(value, bool) for value in mapping.values())
+            or sorted(mapping.values()) != list(range(len(mapping)))):
+        raise ValueError("class mapping must include normal and contiguous zero-based integer indices")
+    names = [name for name, _ in sorted(mapping.items(), key=lambda pair: pair[1])]
+    if serving_model.get("class_names") != names or serving_model.get("n_features") != 249:
+        raise ValueError("champion and candidate class/feature contracts differ")
+    return names
+
+
+def validate_label_coverage(labels: np.ndarray, names: list[str], split: str) -> None:
+    if (labels < 0).any() or (labels >= len(names)).any():
+        raise ValueError(f"unknown {split} class")
+    missing = [name for i, name in enumerate(names) if not np.any(labels == i)]
+    if missing:
+        raise ValueError(f"{split} is missing declared diagnosis classes: {missing}")
 
 
 def training_rows(labels: np.ndarray, indices: np.ndarray, normal: int, seed: int,
@@ -72,6 +114,69 @@ def record_event(output: Path, event: str, **fields) -> None:
         stream.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
 
 
+def audit_training_data(data_dir: Path, champion_dir: Path, seed: int = 42,
+                        data_kind: str = "unspecified") -> dict:
+    report = {"schema": "servicerobot.diagnosis.data_audit.v1", "seed": seed,
+              "audited_at_utc": datetime.now(timezone.utc).isoformat(),
+              "data_kind": data_kind, "ready_for_candidate_comparison": False,
+              "model_performance_evaluated": False, "issues": [], "splits": {},
+              "limitations": ["source_authenticity_not_verified", "field_performance_not_evaluated",
+                              "saved_booster_contents_not_validated", "engineered_features_not_evaluated"]}
+    if data_kind not in DATA_KINDS:
+        report["issues"].append({"code": "invalid_configuration", "detail": "unknown data kind"})
+    files = {"training_windows": data_dir / "enhanced_train.npz",
+             "validation_windows": data_dir / "enhanced_val.npz",
+             "dataset_metadata": data_dir / "enhanced_meta.json",
+             "serving_dataset_metadata": champion_dir / "enhanced_meta.json",
+             "serving_model_metadata": champion_dir / "robot_pdm_enhanced_meta.json",
+             "serving_model": champion_dir / "robot_pdm_enhanced.txt"}
+    report["files"] = {key: {"path": str(path.resolve()), "present": path.is_file()} for key, path in files.items()}
+    for key, path in files.items():
+        if not path.is_file():
+            report["issues"].append({"code": "missing_file", "input": key, "detail": str(path)})
+    names = None
+    if all(files[key].is_file() for key in ("dataset_metadata", "serving_dataset_metadata", "serving_model_metadata")):
+        try:
+            metadata, serving_dataset, serving_model = [json.loads(files[key].read_text(encoding="utf-8"))
+                for key in ("dataset_metadata", "serving_dataset_metadata", "serving_model_metadata")]
+            names = validate_metadata_contract(metadata, serving_dataset, serving_model)
+            report["class_order"] = names
+        except (OSError, ValueError, TypeError) as error:
+            report["issues"].append({"code": "invalid_metadata", "detail": str(error)})
+    datasets = {}
+    for split, key in (("train", "training_windows"), ("validation", "validation_windows")):
+        if not files[key].is_file():
+            continue
+        try:
+            rows = load_dataset(files[key], with_features=False)
+            datasets[split] = rows
+            report["splits"][split] = {"rows": len(rows["y"]), "assets": len(np.unique(rows["groups"]))}
+            if names is not None:
+                report["splits"][split]["per_class"] = dataset_support(rows["y"], rows["groups"], names)
+                validate_label_coverage(rows["y"], names, split)
+        except (OSError, ValueError, TypeError, EOFError, zipfile.BadZipFile) as error:
+            report["issues"].append({"code": "invalid_dataset", "split": split, "detail": str(error)})
+    if set(datasets) == {"train", "validation"}:
+        train, validation = datasets["train"], datasets["validation"]
+        overlap = sorted(set(train["groups"]) & set(validation["groups"]))
+        report["official_asset_overlap"] = {"count": len(overlap), "examples": overlap[:10]}
+        if overlap:
+            report["issues"].append({"code": "official_asset_overlap", "detail": f"{len(overlap)} shared assets"})
+        if names is not None and not report["issues"]:
+            try:
+                fit, selection = asset_holdout(train["y"], train["groups"], seed, require_all_classes=True)
+                report["selection_plan"] = {
+                    "protocol": "robot_group_holdout", "official_validation_used_for_selection": False,
+                    "fit_assets": sorted(set(train["groups"][fit])),
+                    "selection_assets": sorted(set(train["groups"][selection])),
+                    "fit_support": dataset_support(train["y"][fit], train["groups"][fit], names),
+                    "selection_support": dataset_support(train["y"][selection], train["groups"][selection], names)}
+            except ValueError as error:
+                report["issues"].append({"code": "holdout_unavailable", "detail": str(error)})
+    report["ready_for_candidate_comparison"] = not report["issues"]
+    return report
+
+
 def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                      seed: int = 42, rounds: int = 800, max_false_alarm: float = 0.05,
                      normal_ratios: tuple[int | None, ...] = NORMAL_RATIOS,
@@ -95,20 +200,10 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
         raise ValueError(f"official train/validation asset overlap: {overlap[:5]}")
     metadata = json.loads((data_dir / "enhanced_meta.json").read_text(encoding="utf-8"))
     champion_dataset_meta = json.loads((champion_dir / "enhanced_meta.json").read_text(encoding="utf-8"))
-    for key in ("devtype_map", "mainstate_map", "crowd_map", "dyn", "stat"):
-        if metadata[key] != champion_dataset_meta[key]:
-            raise ValueError(f"champion and candidate encoding contracts differ: {key}")
-    ordered = sorted(metadata["err_map"].items(), key=lambda pair: pair[1])
-    if [value for _, value in ordered] != list(range(len(ordered))):
-        raise ValueError("class mapping must use contiguous zero-based indices")
-    names = [name for name, _ in ordered]
-    if set(train["y"].tolist()) != set(range(len(names))):
-        raise ValueError("training dataset must contain all declared diagnosis classes")
-    if (validation["y"] < 0).any() or (validation["y"] >= len(names)).any():
-        raise ValueError("unknown validation class")
     champion_meta = json.loads((champion_dir / "robot_pdm_enhanced_meta.json").read_text(encoding="utf-8"))
-    if champion_meta["class_names"] != names or champion_meta["n_features"] != 249:
-        raise ValueError("champion and candidate class/feature contracts differ")
+    names = validate_metadata_contract(metadata, champion_dataset_meta, champion_meta)
+    validate_label_coverage(train["y"], names, "training")
+    validate_label_coverage(validation["y"], names, "validation")
     normal = names.index("정상")
     fit, selection = asset_holdout(train["y"], train["groups"], seed, require_all_classes=True)
     train_features = pd.DataFrame(train["features"])
@@ -221,7 +316,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--weight-modes", nargs="+", choices=WEIGHT_MODES, default=list(WEIGHT_MODES))
     parser.add_argument("--data-kind", choices=DATA_KINDS, default="unspecified",
                         help="declared data source, not an independently verified provenance claim")
+    parser.add_argument("--preflight-only", action="store_true", help="audit inputs and robot coverage without training")
+    parser.add_argument("--preflight-report", type=Path, help="save the preflight JSON to a new file; never overwrite")
     args = parser.parse_args(argv)
+    if args.preflight_report is not None and not args.preflight_only:
+        parser.error("--preflight-report requires --preflight-only")
+    if args.preflight_only:
+        report = audit_training_data(args.data_dir, args.champion_dir, args.seed, args.data_kind)
+        encoded = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
+        if args.preflight_report is not None:
+            try:
+                args.preflight_report.parent.mkdir(parents=True, exist_ok=True)
+                with args.preflight_report.open("x", encoding="utf-8") as stream:
+                    stream.write(encoded + "\n")
+            except OSError as error:
+                parser.exit(2, f"Cannot save preflight report: {error}\n")
+        print(encoded)
+        return 0 if report["ready_for_candidate_comparison"] else 2
     if args.rounds < 1 or not 0 <= args.max_false_alarm <= 1:
         parser.error("rounds must be positive and false-alarm limit must be between 0 and 1")
     started = time.perf_counter()
