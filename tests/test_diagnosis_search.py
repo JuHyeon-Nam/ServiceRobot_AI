@@ -62,6 +62,7 @@ def test_support_counts_windows_and_independent_assets_separately():
     {"normal_ratios": ()}, {"normal_ratios": (2, 2)}, {"normal_ratios": (-1,)},
     {"weight_modes": ()}, {"weight_modes": ("invalid",)},
     {"weight_modes": ("balanced", "balanced")}, {"data_kind": "physical_robot"},
+    {"iteration_metric": "accuracy"},
     {"rounds": 0}, {"max_false_alarm": float("nan")},
 ])
 def test_search_rejects_invalid_config_before_loading_data(tmp_path, config):
@@ -83,12 +84,15 @@ def test_cli_maps_zero_to_full_data_and_forwards_grid(tmp_path, monkeypatch, cap
 
     def fake_train(*args):
         received["ratios"], received["modes"], received["kind"] = args[6:9]
+        received["criterion"] = args[9]
         return {"selected_candidate": "test", "candidate": {}, "promotion": {"eligible": False}}
 
     monkeypatch.setattr(train_diagnosis, "train_candidates", fake_train)
     assert main(["--output", str(tmp_path), "--normal-ratios", "0", "2", "5",
-                 "--weight-modes", "unweighted", "balanced", "--data-kind", "synthetic_fixture"]) == 0
-    assert received == {"ratios": (None, 2, 5), "modes": ("unweighted", "balanced"), "kind": "synthetic_fixture"}
+                 "--weight-modes", "unweighted", "balanced", "--data-kind", "synthetic_fixture",
+                 "--iteration-metric", "multi_logloss"]) == 0
+    assert received == {"ratios": (None, 2, 5), "modes": ("unweighted", "balanced"),
+                        "kind": "synthetic_fixture", "criterion": "multi_logloss"}
     assert json.loads(capsys.readouterr().out)["data_kind"] == "synthetic_fixture"
 
 

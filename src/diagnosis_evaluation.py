@@ -6,6 +6,21 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 from sklearn.model_selection import GroupShuffleSplit
 
 
+def macro_f1_eval(y_true: np.ndarray, probabilities: np.ndarray) -> tuple[str, float, bool]:
+    """Unweighted sklearn-style LightGBM metric with a fixed multiclass denominator."""
+    y = np.asarray(y_true, dtype=float)
+    probabilities = np.asarray(probabilities, dtype=float)
+    if (y.ndim != 1 or not len(y) or probabilities.ndim != 2
+            or probabilities.shape[0] != len(y) or probabilities.shape[1] < 2):
+        raise ValueError("macro-F1 requires labels (n,) and multiclass predictions (n, classes)")
+    if (not np.isfinite(y).all() or not np.isfinite(probabilities).all()
+            or (y != np.floor(y)).any() or (y < 0).any() or (y >= probabilities.shape[1]).any()):
+        raise ValueError("macro-F1 requires finite predictions and valid integer class indices")
+    score = f1_score(y.astype(int), probabilities.argmax(axis=1),
+                     labels=np.arange(probabilities.shape[1]), average="macro", zero_division=0)
+    return "macro_f1", float(score), True
+
+
 def classification_metrics(y: np.ndarray, probabilities: np.ndarray, names: list[str]) -> dict:
     y, probabilities = np.asarray(y, dtype=int), np.asarray(probabilities, dtype=float)
     if probabilities.shape != (len(y), len(names)) or not len(y):

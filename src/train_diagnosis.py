@@ -15,13 +15,15 @@ import numpy as np
 import pandas as pd
 import sklearn
 
-from diagnosis_evaluation import asset_holdout, class_weights, classification_metrics, promotion_gate
+from diagnosis_evaluation import asset_holdout, class_weights, classification_metrics, macro_f1_eval, promotion_gate
 from pdm_runtime import MODEL_DYN_IDX, load_booster, make_feature_matrix
 
 ROOT = Path(__file__).resolve().parents[1]
 NORMAL_RATIOS = (None, 2, 3, 5)
 WEIGHT_MODES = ("unweighted", "sqrt_balanced", "balanced")
 DATA_KINDS = ("unspecified", "aihub_recorded", "synthetic_fixture")
+ITERATION_METRICS = ("macro_f1", "multi_logloss")
+EARLY_STOPPING_ROUNDS = 40
 
 
 def load_dataset(path: Path, *, with_features: bool = True) -> dict:
@@ -180,7 +182,8 @@ def audit_training_data(data_dir: Path, champion_dir: Path, seed: int = 42,
 def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                      seed: int = 42, rounds: int = 800, max_false_alarm: float = 0.05,
                      normal_ratios: tuple[int | None, ...] = NORMAL_RATIOS,
-                     weight_modes: tuple[str, ...] = WEIGHT_MODES, data_kind: str = "unspecified") -> dict:
+                     weight_modes: tuple[str, ...] = WEIGHT_MODES, data_kind: str = "unspecified",
+                     iteration_metric: str = "macro_f1") -> dict:
     destination, serving = output.resolve(), champion_dir.resolve()
     if destination == serving or destination in serving.parents or serving in destination.parents:
         raise ValueError("candidate output must not overwrite the serving model directory")
@@ -188,6 +191,8 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
         raise ValueError("candidate output must be empty; use a new directory for each experiment")
     if rounds < 1 or not 0 <= max_false_alarm <= 1 or data_kind not in DATA_KINDS:
         raise ValueError("invalid rounds, false-alarm limit, or data kind")
+    if iteration_metric not in ITERATION_METRICS:
+        raise ValueError("unsupported iteration selection metric")
     if (not normal_ratios or len(set(normal_ratios)) != len(normal_ratios)
             or any(r is not None and (isinstance(r, bool) or not isinstance(r, int) or r < 1) for r in normal_ratios)):
         raise ValueError("normal ratios must be unique positive integers or None")
@@ -216,9 +221,15 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                "champion_sha256": file_sha256(champion_dir / "robot_pdm_enhanced.txt")}
     environment = {"python": platform.python_version(), "numpy": np.__version__, "pandas": pd.__version__,
                    "lightgbm": lgb.__version__, "scikit_learn": sklearn.__version__}
+    iteration_selection = {"metric": iteration_metric, "higher_is_better": iteration_metric == "macro_f1",
+                           "dataset": "training_robot_holdout", "sample_weighted": False,
+                           "patience": EARLY_STOPPING_ROUNDS, "default_metric_disabled": True,
+                           "builtin_metrics_disabled": iteration_metric == "macro_f1",
+                           "training_objective": "multiclass"}
     output.mkdir(parents=True, exist_ok=True)
     record_event(output, "run_started", seed=seed, rounds=rounds, lineage=lineage,
-                 normal_ratios=list(normal_ratios), weight_modes=list(weight_modes), environment=environment)
+                 normal_ratios=list(normal_ratios), weight_modes=list(weight_modes), environment=environment,
+                 iteration_selection=iteration_selection)
     experiments = []
     for ratio in normal_ratios:
         indices = training_rows(train["y"], fit, normal, seed, ratio)
@@ -229,13 +240,18 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
             model = lgb.LGBMClassifier(
                 n_estimators=rounds, learning_rate=0.05, num_leaves=63, max_depth=8,
                 min_child_samples=40, colsample_bytree=0.8, reg_lambda=1.0,
+                objective="multiclass", metric="None",
                 random_state=seed, n_jobs=2, verbosity=-1, deterministic=True, force_col_wise=True,
             )
+            history = {}
             try:
                 model.fit(train_features.iloc[indices], train["y"][indices],
                           sample_weight=class_weights(train["y"][indices], mode),
                           eval_set=[(train_features.iloc[selection], train["y"][selection])],
-                          callbacks=[lgb.early_stopping(40, verbose=False)])
+                          eval_names=["robot_holdout"],
+                          eval_metric=macro_f1_eval if iteration_metric == "macro_f1" else "multi_logloss",
+                          callbacks=[lgb.record_evaluation(history),
+                                     lgb.early_stopping(EARLY_STOPPING_ROUNDS, first_metric_only=True, verbose=False)])
                 metrics = classification_metrics(train["y"][selection],
                                                  model.predict_proba(train_features.iloc[selection]), names)
             except Exception as error:
@@ -244,6 +260,8 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
             row = {"candidate_id": candidate_id, "mode": mode, "normal_ratio": ratio, "rows": len(indices),
                    "training_support": dataset_support(train["y"][indices], train["groups"][indices], names),
                    "selection_metrics": metrics, "best_iteration": int(model.best_iteration_),
+                   "iteration_history": {"dataset": "training_robot_holdout", "metric": iteration_metric,
+                                         "values": history["robot_holdout"][iteration_metric]},
                    "elapsed_sec": round(time.perf_counter() - started, 4)}
             record_event(output, "candidate_completed", **row)
             experiments.append({**row, "model": model})
@@ -264,6 +282,7 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
     report = {
         "schema": "servicerobot.diagnosis.experiment.v2", "seed": seed,
         "lineage": lineage, "environment": environment,
+        "iteration_selection": iteration_selection,
         "search_space": {"normal_ratios": list(normal_ratios), "weight_modes": list(weight_modes),
                          "candidate_count": len(experiments), "rounds": rounds},
         "selection_protocol": "robot_group_holdout", "official_validation_used_for_selection": False,
@@ -288,11 +307,13 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                       "dyn": metadata["dyn"], "model_dyn_idx": MODEL_DYN_IDX,
                       "stat": metadata["stat"], "err_map": metadata["err_map"],
                       "selection_protocol": "robot_group_holdout", "automatic_promotion": False,
+                      "iteration_selection_metric": iteration_metric,
                       "data_kind": data_kind, "candidate_id": winner["candidate_id"]}
     for name, value in (("robot_pdm_enhanced_meta.json", candidate_meta), ("enhanced_meta.json", metadata),
                         ("experiment_report.json", report)):
         (output / name).write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     comparison = [{"candidate_id": row["candidate_id"],
+                   "iteration_metric": iteration_metric,
                    "normal_ratio": "all" if row["normal_ratio"] is None else row["normal_ratio"],
                    "weight_mode": row["mode"], "training_rows": row["rows"], "best_iteration": row["best_iteration"],
                    **{key: row["selection_metrics"][key] for key in
@@ -316,6 +337,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--weight-modes", nargs="+", choices=WEIGHT_MODES, default=list(WEIGHT_MODES))
     parser.add_argument("--data-kind", choices=DATA_KINDS, default="unspecified",
                         help="declared data source, not an independently verified provenance claim")
+    parser.add_argument("--iteration-metric", choices=ITERATION_METRICS, default="macro_f1",
+                        help="robot-holdout early stopping metric; not the tree training objective")
     parser.add_argument("--preflight-only", action="store_true", help="audit inputs and robot coverage without training")
     parser.add_argument("--preflight-report", type=Path, help="save the preflight JSON to a new file; never overwrite")
     args = parser.parse_args(argv)
@@ -340,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
         report = train_candidates(args.data_dir, args.output, args.champion_dir,
                                   args.seed, args.rounds, args.max_false_alarm,
                                   tuple(None if r == 0 else r for r in args.normal_ratios),
-                                  tuple(args.weight_modes), args.data_kind)
+                                  tuple(args.weight_modes), args.data_kind, args.iteration_metric)
     except (FileNotFoundError, ValueError) as error:
         parser.exit(2, f"Diagnosis experiment: {error}\n")
     print(json.dumps({"selected_candidate": report["selected_candidate"], "data_kind": args.data_kind,

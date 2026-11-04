@@ -235,10 +235,22 @@ def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path, monkeyp
     assert report["lineage"]["data_kind"] == "synthetic_fixture"
     assert len(report["lineage"]["champion_sha256"]) == 64
     assert len(pd.read_csv(output / "selection_results.csv")) == 12
+    assert set(pd.read_csv(output / "selection_results.csv")["iteration_metric"]) == {"macro_f1"}
     events = [json.loads(line) for line in (output / "training_events.jsonl").read_text().splitlines()]
     assert events[0]["event"] == "run_started"
     assert events[-1]["event"] == "run_completed"
     assert sum(row["event"] == "candidate_completed" for row in events) == 12
+    assert report["iteration_selection"]["metric"] == "macro_f1"
+    assert report["iteration_selection"]["builtin_metrics_disabled"]
+    assert report["iteration_selection"]["training_objective"] == "multiclass"
+    for row in report["experiments"]:
+        history = row["iteration_history"]
+        assert history["dataset"] == "training_robot_holdout"
+        assert history["metric"] == "macro_f1"
+        assert len(history["values"]) == 2
+        best = row["best_iteration"] - 1
+        assert history["values"][best] == max(history["values"])
+        assert row["selection_metrics"]["macro_f1"] == pytest.approx(history["values"][best], abs=1e-6)
     assert all(row["selection_metrics"]["class_coverage"] == classes for row in report["experiments"])
     assert {row["normal_ratio"] for row in report["experiments"]} == {None, 2, 3, 5}
     assert {row["mode"] for row in report["experiments"]} == {"unweighted", "sqrt_balanced", "balanced"}
@@ -261,6 +273,20 @@ def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path, monkeyp
         train_candidates(tmp_path, champion, champion)
     with pytest.raises(ValueError, match="empty"):
         train_candidates(tmp_path, output, champion, rounds=2)
+
+    baseline = train_candidates(tmp_path, tmp_path / "logloss-baseline", champion, rounds=2,
+                                normal_ratios=(3,), weight_modes=("unweighted",), data_kind="synthetic_fixture",
+                                iteration_metric="multi_logloss")
+    assert baseline["split_audit"] == report["split_audit"]
+    assert baseline["iteration_selection"]["metric"] == "multi_logloss"
+    assert not baseline["iteration_selection"]["higher_is_better"]
+    assert not baseline["iteration_selection"]["builtin_metrics_disabled"]
+    assert baseline["iteration_selection"]["default_metric_disabled"]
+    baseline_row = baseline["experiments"][0]
+    losses = baseline_row["iteration_history"]["values"]
+    assert baseline_row["iteration_history"]["metric"] == "multi_logloss"
+    assert losses[baseline_row["best_iteration"] - 1] == min(losses)
+    assert not baseline["official_validation_used_for_selection"]
 
     def forced_false_alarms(y, probabilities, names):
         result = classification_metrics(y, probabilities, names)
