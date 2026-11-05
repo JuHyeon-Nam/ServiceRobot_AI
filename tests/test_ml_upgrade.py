@@ -100,14 +100,21 @@ def test_invalid_probabilities_rejected(probabilities):
 
 
 def test_promotion_rejects_accuracy_only_improvement():
-    champion = dict(macro_f1=.6, accuracy=.9, normal_false_alarm_rate=.02,
-                    fault_miss_rate=.2, class_coverage=2, class_order=["정상", "fault"])
-    candidate = dict(champion, accuracy=.95, macro_f1=.59)
+    def report(matrix):
+        y, pred = [], []
+        for actual, row in enumerate(matrix):
+            for predicted, count in enumerate(row):
+                y.extend([actual] * count)
+                pred.extend([predicted] * count)
+        return classification_metrics(np.array(y), np.eye(2)[pred], ["정상", "fault"])
+
+    champion = report([[900, 50], [20, 30]])
+    candidate = report([[950, 0], [50, 0]])
     assert not promotion_gate(champion, candidate)["eligible"]
-    candidate.update(macro_f1=.65, fault_miss_rate=.1)
+    candidate = report([[940, 10], [10, 40]])
     gate = promotion_gate(champion, candidate)
     assert gate["eligible"] and not gate["automatic_promotion"]
-    candidate["normal_false_alarm_rate"] = .1
+    candidate = report([[890, 60], [10, 40]])
     assert "normal_false_alarm_limit" in promotion_gate(champion, candidate)["reasons"]
 
 

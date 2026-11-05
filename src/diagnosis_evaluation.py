@@ -1,6 +1,10 @@
 """Classification metrics, robot holdout, and candidate promotion criteria."""
 from __future__ import annotations
 
+from fractions import Fraction
+from math import isfinite
+from numbers import Integral, Real
+
 import numpy as np
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score, log_loss
 from sklearn.model_selection import GroupShuffleSplit
@@ -91,21 +95,95 @@ def class_weights(labels: np.ndarray, mode: str) -> np.ndarray:
     return weight / weight.mean()
 
 
+def _unit_interval(value: object) -> bool:
+    return (isinstance(value, Real) and not isinstance(value, bool)
+            and 0 <= value <= 1 and isfinite(value))
+
+
+def _promotion_evidence(report: dict) -> tuple[dict | None, list[str]]:
+    """Validate reported scores against integer counts before policy comparisons."""
+    if not isinstance(report, dict):
+        return None, ["report_not_object"]
+    metric_names = ("accuracy", "macro_f1", "normal_false_alarm_rate", "fault_miss_rate")
+    errors = [f"invalid_{key}" for key in metric_names if not _unit_interval(report.get(key))]
+    names = report.get("class_order")
+    if (not isinstance(names, list) or len(names) < 2
+            or any(not isinstance(name, str) or not name.strip() for name in names)
+            or len(set(names)) != len(names) or "정상" not in names):
+        return None, errors + ["invalid_class_order"]
+    rows, coverage = report.get("rows"), report.get("class_coverage")
+    if not isinstance(rows, Integral) or isinstance(rows, bool) or rows <= 0:
+        errors.append("invalid_rows")
+    if not isinstance(coverage, Integral) or isinstance(coverage, bool) or coverage != len(names):
+        errors.append("incomplete_class_coverage")
+    try:
+        matrix = np.asarray(report.get("confusion_matrix"), dtype=object)
+    except (TypeError, ValueError):
+        return None, errors + ["invalid_confusion_matrix"]
+    if matrix.shape != (len(names), len(names)) or any(
+            not isinstance(value, Integral) or isinstance(value, bool) or value < 0 for value in matrix.flat):
+        return None, errors + ["invalid_confusion_matrix"]
+
+    # Python integers avoid overflow in count totals; fractions preserve threshold boundaries.
+    counts = [[int(value) for value in row] for row in matrix]
+    support = tuple(sum(row) for row in counts)
+    predicted = [sum(column) for column in zip(*counts)]
+    total = sum(support)
+    if total != rows:
+        errors.append("confusion_rows_mismatch")
+    if any(count == 0 for count in support):
+        errors.append("missing_validation_classes")
+    if errors:
+        return None, errors
+    normal = names.index("정상")
+    rates = {
+        "accuracy": Fraction(sum(counts[i][i] for i in range(len(names))), total),
+        "macro_f1": sum(Fraction(2 * counts[i][i], support[i] + predicted[i])
+                        for i in range(len(names))) / len(names),
+        "normal_false_alarm_rate": Fraction(support[normal] - counts[normal][normal], support[normal]),
+        "fault_miss_rate": Fraction(sum(counts[i][normal] for i in range(len(names)) if i != normal),
+                                    total - support[normal]),
+    }
+    # classification_metrics serializes these four scores to six decimal places.
+    errors = [f"inconsistent_{key}" for key in metric_names
+              if abs(float(report[key]) - float(rates[key])) > 5.000001e-7]
+    if errors:
+        return None, errors
+    return {"rates": rates, "class_order": tuple(names), "support": support, "rows": total}, []
+
+
 def promotion_gate(champion: dict, candidate: dict, max_false_alarm: float = 0.05,
                    min_macro_gain: float = 0.01, max_accuracy_drop: float = 0.005) -> dict:
+    thresholds = {"min_macro_f1_gain": min_macro_gain, "max_accuracy_drop": max_accuracy_drop,
+                  "max_normal_false_alarm": max_false_alarm}
+    if any(not _unit_interval(value) for value in thresholds.values()):
+        raise ValueError("promotion thresholds must be finite numbers between zero and one")
+    thresholds = {key: float(value) for key, value in thresholds.items()}
+    champion_evidence, champion_errors = _promotion_evidence(champion)
+    candidate_evidence, candidate_errors = _promotion_evidence(candidate)
     reasons = []
-    if candidate["macro_f1"] < champion["macro_f1"] + min_macro_gain:
+    result = {"eligible": False, "reasons": reasons, "automatic_promotion": False,
+              "comparison_basis": "confusion_matrix_counts", "thresholds": thresholds,
+              "validation_errors": {"champion": champion_errors, "candidate": candidate_errors}}
+    if champion_errors:
+        reasons.append("invalid_champion_report")
+    if candidate_errors:
+        reasons.append("invalid_candidate_report")
+    if reasons:
+        return result
+    for field in ("class_order", "rows", "support"):
+        if champion_evidence[field] != candidate_evidence[field]:
+            reasons.append(f"validation_{field}_mismatch")
+    if reasons:
+        return result
+    before, after = champion_evidence["rates"], candidate_evidence["rates"]
+    if after["macro_f1"] - before["macro_f1"] < Fraction(str(thresholds["min_macro_f1_gain"])):
         reasons.append("macro_f1_gain_below_threshold")
-    if candidate["accuracy"] < champion["accuracy"] - max_accuracy_drop:
+    if before["accuracy"] - after["accuracy"] > Fraction(str(thresholds["max_accuracy_drop"])):
         reasons.append("accuracy_regression")
-    if candidate["normal_false_alarm_rate"] is None or candidate["normal_false_alarm_rate"] > max_false_alarm:
+    if after["normal_false_alarm_rate"] > Fraction(str(thresholds["max_normal_false_alarm"])):
         reasons.append("normal_false_alarm_limit")
-    if candidate["fault_miss_rate"] is None or champion["fault_miss_rate"] is None:
-        reasons.append("missing_fault_observations")
-    elif candidate["fault_miss_rate"] > champion["fault_miss_rate"]:
+    if after["fault_miss_rate"] > before["fault_miss_rate"]:
         reasons.append("fault_miss_regression")
-    if candidate["class_coverage"] != len(candidate["class_order"]):
-        reasons.append("missing_validation_classes")
-    return {"eligible": not reasons, "reasons": reasons, "automatic_promotion": False,
-            "thresholds": {"min_macro_f1_gain": min_macro_gain,
-                           "max_accuracy_drop": max_accuracy_drop, "max_normal_false_alarm": max_false_alarm}}
+    result["eligible"] = not reasons
+    return result
