@@ -15,7 +15,8 @@ import numpy as np
 import pandas as pd
 import sklearn
 
-from diagnosis_evaluation import asset_holdout, class_weights, classification_metrics, macro_f1_eval, promotion_gate
+from diagnosis_evaluation import (asset_holdout, class_weights, classification_metrics, macro_f1_eval,
+                                  promotion_gate, select_candidate)
 from pdm_runtime import MODEL_DYN_IDX, load_booster, make_feature_matrix
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -229,7 +230,7 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
     output.mkdir(parents=True, exist_ok=True)
     record_event(output, "run_started", seed=seed, rounds=rounds, lineage=lineage,
                  normal_ratios=list(normal_ratios), weight_modes=list(weight_modes), environment=environment,
-                 iteration_selection=iteration_selection)
+                 iteration_selection=iteration_selection, max_false_alarm=max_false_alarm)
     experiments = []
     for ratio in normal_ratios:
         indices = training_rows(train["y"], fit, normal, seed, ratio)
@@ -265,15 +266,21 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                    "elapsed_sec": round(time.perf_counter() - started, 4)}
             record_event(output, "candidate_completed", **row)
             experiments.append({**row, "model": model})
-    feasible = [row for row in experiments if row["selection_metrics"]["normal_false_alarm_rate"] is not None
-                and row["selection_metrics"]["normal_false_alarm_rate"] <= max_false_alarm]
-    winner = max(feasible or experiments, key=lambda row: row["selection_metrics"]["macro_f1"])
+    try:
+        selection_decision = select_candidate({row["candidate_id"]: row["selection_metrics"]
+                                               for row in experiments}, max_false_alarm)
+    except ValueError as error:
+        record_event(output, "selection_failed", error_type=type(error).__name__, detail=str(error))
+        raise
+    selection_decision["dataset"] = "training_robot_holdout"
+    winner = next(row for row in experiments if row["candidate_id"] == selection_decision["selected_candidate"])
+    record_event(output, "candidate_selected", **selection_decision)
     model = winner["model"]
     candidate_metrics = classification_metrics(validation["y"], model.predict_proba(validation_features), names)
     champion = load_booster(champion_dir / "robot_pdm_enhanced.txt")
     champion_metrics = classification_metrics(validation["y"], champion.predict(validation["features"]), names)
     promotion = promotion_gate(champion_metrics, candidate_metrics, max_false_alarm)
-    if not feasible:
+    if not selection_decision["constraint_met"]:
         promotion["eligible"] = False
         promotion["reasons"].append("selection_false_alarm_limit")
     if data_kind != "aihub_recorded":
@@ -295,7 +302,8 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                             "official_validation": dataset_support(validation["y"], validation["groups"], names)},
         "experiments": [{key: value for key, value in row.items() if key != "model"} for row in experiments],
         "selected_mode": winner["mode"], "selected_candidate": winner["candidate_id"],
-        "selected_normal_ratio": winner["normal_ratio"], "selection_constraint_met": bool(feasible),
+        "selected_normal_ratio": winner["normal_ratio"],
+        "selection_constraint_met": selection_decision["constraint_met"], "selection_decision": selection_decision,
         "champion": champion_metrics, "candidate": candidate_metrics,
         "promotion": promotion,
         "probability_calibration": "not_fitted; weighted candidates require calibration before deployment",

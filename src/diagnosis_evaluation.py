@@ -100,7 +100,7 @@ def _unit_interval(value: object) -> bool:
             and 0 <= value <= 1 and isfinite(value))
 
 
-def _promotion_evidence(report: dict) -> tuple[dict | None, list[str]]:
+def _classification_evidence(report: dict) -> tuple[dict | None, list[str]]:
     """Validate reported scores against integer counts before policy comparisons."""
     if not isinstance(report, dict):
         return None, ["report_not_object"]
@@ -152,6 +152,34 @@ def _promotion_evidence(report: dict) -> tuple[dict | None, list[str]]:
     return {"rates": rates, "class_order": tuple(names), "support": support, "rows": total}, []
 
 
+def select_candidate(reports: dict[str, dict], max_false_alarm: float = 0.05) -> dict:
+    """Rank comparable holdout reports by exact Macro-F1, preserving order on ties."""
+    if not _unit_interval(max_false_alarm):
+        raise ValueError("selection false-alarm limit must be a finite number between zero and one")
+    if (not isinstance(reports, dict) or not reports
+            or any(not isinstance(key, str) or not key.strip() for key in reports)):
+        raise ValueError("selection requires nonempty candidate IDs and metric reports")
+    evidence = {}
+    for candidate_id, report in reports.items():
+        row, errors = _classification_evidence(report)
+        if errors:
+            raise ValueError(f"invalid selection metrics for {candidate_id}: {', '.join(errors)}")
+        evidence[candidate_id] = row
+    reference = next(iter(evidence.values()))
+    for candidate_id, row in evidence.items():
+        for field in ("class_order", "rows", "support"):
+            if row[field] != reference[field]:
+                raise ValueError(f"selection {field} mismatch for {candidate_id}")
+    limit = Fraction(str(float(max_false_alarm)))
+    feasible = [key for key, row in evidence.items() if row["rates"]["normal_false_alarm_rate"] <= limit]
+    ranked = sorted(feasible or list(evidence), key=lambda key: evidence[key]["rates"]["macro_f1"], reverse=True)
+    return {"selected_candidate": ranked[0], "constraint_met": bool(feasible),
+            "selection_pool": "feasible_candidates" if feasible else "unconstrained_fallback",
+            "candidate_order": list(evidence), "feasible_candidates": feasible, "ranked_candidates": ranked,
+            "ranking_metric": "macro_f1", "comparison_basis": "confusion_matrix_counts",
+            "tie_break": "first_in_search_order", "max_normal_false_alarm": float(max_false_alarm)}
+
+
 def promotion_gate(champion: dict, candidate: dict, max_false_alarm: float = 0.05,
                    min_macro_gain: float = 0.01, max_accuracy_drop: float = 0.005) -> dict:
     thresholds = {"min_macro_f1_gain": min_macro_gain, "max_accuracy_drop": max_accuracy_drop,
@@ -159,8 +187,8 @@ def promotion_gate(champion: dict, candidate: dict, max_false_alarm: float = 0.0
     if any(not _unit_interval(value) for value in thresholds.values()):
         raise ValueError("promotion thresholds must be finite numbers between zero and one")
     thresholds = {key: float(value) for key, value in thresholds.items()}
-    champion_evidence, champion_errors = _promotion_evidence(champion)
-    candidate_evidence, candidate_errors = _promotion_evidence(candidate)
+    champion_evidence, champion_errors = _classification_evidence(champion)
+    candidate_evidence, candidate_errors = _classification_evidence(candidate)
     reasons = []
     result = {"eligible": False, "reasons": reasons, "automatic_promotion": False,
               "comparison_basis": "confusion_matrix_counts", "thresholds": thresholds,

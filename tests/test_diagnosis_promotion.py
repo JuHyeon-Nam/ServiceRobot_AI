@@ -1,4 +1,4 @@
-"""Synthetic count fixtures for fail-closed candidate review, not model performance."""
+"""Synthetic count fixtures for candidate selection/review, not model performance."""
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -9,7 +9,7 @@ import pytest
 from sklearn.metrics import accuracy_score, f1_score
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from diagnosis_evaluation import classification_metrics, promotion_gate
+from diagnosis_evaluation import classification_metrics, promotion_gate, select_candidate
 
 
 def count_report(counts, names=None):
@@ -193,3 +193,105 @@ def test_count_totals_do_not_overflow_int64(reports):
 def test_invalid_policy_configuration_is_an_error(reports, parameter, value):
     with pytest.raises(ValueError, match="promotion thresholds"):
         promotion_gate(*reports, **{parameter: value})
+
+
+def test_selection_rejects_false_alarm_hidden_by_rounding():
+    over_limit = count_report([[9_499_996, 500_004], [0, 10_000_000]])
+    within_limit = count_report([[9_500_000, 500_000], [500_000, 9_500_000]])
+    assert over_limit["normal_false_alarm_rate"] == within_limit["normal_false_alarm_rate"] == .05
+    assert over_limit["macro_f1"] > within_limit["macro_f1"]
+    reports = {"over_limit": over_limit, "within_limit": within_limit}
+    original = deepcopy(reports)
+    result = select_candidate(reports)
+    assert result["selected_candidate"] == "within_limit"
+    assert result["feasible_candidates"] == result["ranked_candidates"] == ["within_limit"]
+    assert result["constraint_met"]
+    assert result["selection_pool"] == "feasible_candidates"
+    assert result["comparison_basis"] == "confusion_matrix_counts"
+    assert result["ranking_metric"] == "macro_f1"
+    assert reports == original
+    json.dumps(result, allow_nan=False)
+
+
+def test_selection_distinguishes_macro_f1_hidden_by_rounding():
+    lower = count_report([[9_099_996, 900_004], [900_004, 9_099_996]])
+    higher = count_report([[9_100_000, 900_000], [900_000, 9_100_000]])
+    assert lower["macro_f1"] == higher["macro_f1"] == .91
+    result = select_candidate({"lower_first": lower, "higher_second": higher}, max_false_alarm=.1)
+    assert result["ranked_candidates"] == ["higher_second", "lower_first"]
+    assert result["selected_candidate"] == "higher_second"
+
+
+def test_selection_preserves_search_order_only_on_exact_ties(reports):
+    report = reports[1]
+    for ids in (("second", "first"), ("first", "second")):
+        result = select_candidate(dict.fromkeys(ids, report))
+        assert result["selected_candidate"] == ids[0]
+        assert result["candidate_order"] == result["ranked_candidates"] == list(ids)
+        assert result["tie_break"] == "first_in_search_order"
+
+
+def test_selection_keeps_macro_f1_priority_with_rare_faults():
+    majority_only = count_report([[1000, 0, 0], [10, 0, 0], [2, 0, 0]])
+    rare_faults = count_report([[960, 40, 0], [2, 8, 0], [1, 0, 1]])
+    assert majority_only["accuracy"] > rare_faults["accuracy"]
+    assert majority_only["macro_f1"] < rare_faults["macro_f1"]
+    result = select_candidate({"majority_only": majority_only, "rare_faults": rare_faults})
+    assert result["selected_candidate"] == "rare_faults"
+    assert result["constraint_met"]
+
+
+def test_selection_fallback_is_explicit_and_not_a_promotion():
+    lower = count_report([[9_099_996, 900_004], [900_004, 9_099_996]])
+    higher = count_report([[9_100_000, 900_000], [900_000, 9_100_000]])
+    result = select_candidate({"lower": lower, "higher": higher})
+    assert not result["constraint_met"]
+    assert result["feasible_candidates"] == []
+    assert result["selection_pool"] == "unconstrained_fallback"
+    assert result["selected_candidate"] == "higher"
+    assert result["ranked_candidates"] == ["higher", "lower"]
+    assert "eligible" not in result
+
+
+def test_selection_supports_normal_as_last_class():
+    champion = count_report([[30, 20], [50, 900]], ["fault", "정상"])
+    candidate = count_report([[40, 10], [10, 940]], ["fault", "정상"])
+    result = select_candidate({"champion": champion, "candidate": candidate})
+    assert result["feasible_candidates"] == ["candidate"]
+    assert result["selected_candidate"] == "candidate"
+
+
+@pytest.mark.parametrize("reports", [None, [], {}, {"": {}}, {" ": {}}, {0: {}}])
+def test_selection_requires_named_reports(reports):
+    with pytest.raises(ValueError, match="candidate IDs"):
+        select_candidate(reports)
+
+
+@pytest.mark.parametrize("metric", ["accuracy", "macro_f1", "normal_false_alarm_rate", "fault_miss_rate"])
+def test_selection_does_not_ignore_invalid_candidates(reports, metric):
+    reports[0][metric] = float("nan")
+    with pytest.raises(ValueError, match=f"invalid selection metrics for invalid: invalid_{metric}"):
+        select_candidate({"valid": reports[1], "invalid": reports[0]})
+
+
+@pytest.mark.parametrize("counts,names,field", [
+    ([[98, 2], [2, 98]], ["fault-1", "정상"], "class_order"),
+    ([[98, 2], [2, 99]], None, "rows"),
+    ([[97, 2], [2, 99]], None, "support"),
+])
+def test_selection_refuses_different_holdout_populations(counts, names, field):
+    baseline = count_report([[90, 10], [10, 90]])
+    different = count_report(counts, names)
+    with pytest.raises(ValueError, match=f"selection {field} mismatch for different"):
+        select_candidate({"baseline": baseline, "different": different})
+
+
+@pytest.mark.parametrize("limit", [float("nan"), float("inf"), float("-inf"), -.1, 1.1, True, None, "0.05"])
+def test_selection_rejects_invalid_limits(reports, limit):
+    with pytest.raises(ValueError, match="selection false-alarm limit"):
+        select_candidate({"candidate": reports[1]}, max_false_alarm=limit)
+
+
+@pytest.mark.parametrize("counts,limit", [([[100, 0], [0, 100]], 0), ([[0, 100], [0, 100]], 1)])
+def test_selection_allows_inclusive_constraint_extremes(counts, limit):
+    assert select_candidate({"candidate": count_report(counts)}, max_false_alarm=limit)["constraint_met"]

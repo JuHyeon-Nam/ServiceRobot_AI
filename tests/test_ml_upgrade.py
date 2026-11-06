@@ -229,12 +229,20 @@ def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path, monkeyp
         np.savez(tmp_path / f"enhanced_{split}.npz", X=raw, S=np.zeros((len(labels), 9)), y=labels, groups=groups)
     (tmp_path / "enhanced_meta.json").write_text(json.dumps(meta))
     evaluated_rows = []
+    selection_snapshots = []
+    original_record_event = train_diagnosis.record_event
 
     def track_metrics(y, probabilities, names):
         evaluated_rows.append(len(y))
         return classification_metrics(y, probabilities, names)
 
+    def track_event(output, event, **fields):
+        if event == "candidate_selected":
+            selection_snapshots.append(list(evaluated_rows))
+        original_record_event(output, event, **fields)
+
     monkeypatch.setattr(train_diagnosis, "classification_metrics", track_metrics)
+    monkeypatch.setattr(train_diagnosis, "record_event", track_event)
     output = tmp_path / "candidate"
     report = train_candidates(tmp_path, output, champion, rounds=2, data_kind="synthetic_fixture")
     assert len(report["experiments"]) == 12
@@ -245,8 +253,19 @@ def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path, monkeyp
     assert set(pd.read_csv(output / "selection_results.csv")["iteration_metric"]) == {"macro_f1"}
     events = [json.loads(line) for line in (output / "training_events.jsonl").read_text().splitlines()]
     assert events[0]["event"] == "run_started"
+    assert events[0]["max_false_alarm"] == .05
     assert events[-1]["event"] == "run_completed"
     assert sum(row["event"] == "candidate_completed" for row in events) == 12
+    decision = report["selection_decision"]
+    assert decision["comparison_basis"] == "confusion_matrix_counts"
+    assert decision["dataset"] == "training_robot_holdout"
+    assert decision["selected_candidate"] == report["selected_candidate"] == decision["ranked_candidates"][0]
+    assert decision["constraint_met"] == report["selection_constraint_met"]
+    assert decision["candidate_order"] == [row["candidate_id"] for row in report["experiments"]]
+    selection_events = [row for row in events if row["event"] == "candidate_selected"]
+    assert len(selection_events) == 1
+    assert all(selection_events[0][key] == value for key, value in decision.items())
+    assert json.loads((output / "experiment_report.json").read_text())["selection_decision"] == decision
     assert report["iteration_selection"]["metric"] == "macro_f1"
     assert report["iteration_selection"]["builtin_metrics_disabled"]
     assert report["iteration_selection"]["training_objective"] == "multiclass"
@@ -269,6 +288,7 @@ def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path, monkeyp
         expected_normals = normals if ratio is None else min(normals, faults * ratio)
         assert row["rows"] == faults + expected_normals
     selection_rows = sum(value["rows"] for value in report["dataset_support"]["selection"].values())
+    assert selection_snapshots == [[selection_rows] * 12]
     assert evaluated_rows == [selection_rows] * 12 + [len(labels)] * 2
     assert "data_provenance_not_recorded_aihub" in report["promotion"]["reasons"]
     assert not report["promotion"]["eligible"]
@@ -295,10 +315,37 @@ def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path, monkeyp
     assert losses[baseline_row["best_iteration"] - 1] == min(losses)
     assert not baseline["official_validation_used_for_selection"]
 
+    with monkeypatch.context() as invalid_selection:
+        invalid_calls = []
+
+        def inconsistent_metrics(y, probabilities, names):
+            invalid_calls.append(len(y))
+            result = classification_metrics(y, probabilities, names)
+            result["rows"] += 1
+            return result
+
+        def forbidden_champion_load(*args):
+            pytest.fail("official comparison must not run after invalid holdout evidence")
+
+        invalid_selection.setattr(train_diagnosis, "classification_metrics", inconsistent_metrics)
+        invalid_selection.setattr(train_diagnosis, "load_booster", forbidden_champion_load)
+        invalid_output = tmp_path / "invalid-selection"
+        with pytest.raises(ValueError, match="confusion_rows_mismatch"):
+            train_candidates(tmp_path, invalid_output, champion, rounds=2,
+                             normal_ratios=(3,), weight_modes=("unweighted",), data_kind="synthetic_fixture")
+        assert invalid_calls == [selection_rows]
+        failed_selection = [json.loads(line) for line in (invalid_output / "training_events.jsonl").read_text().splitlines()]
+        assert failed_selection[-1]["event"] == "selection_failed"
+        assert "confusion_rows_mismatch" in failed_selection[-1]["detail"]
+        assert not (invalid_output / "experiment_report.json").exists()
+        assert not (invalid_output / "robot_pdm_enhanced.txt").exists()
+
     def forced_false_alarms(y, probabilities, names):
-        result = classification_metrics(y, probabilities, names)
-        result["normal_false_alarm_rate"] = .1
-        return result
+        forced = probabilities.copy()
+        normal_rows = np.flatnonzero(y == normal)
+        forced[normal_rows] = 0
+        forced[normal_rows, (normal + 1) % len(names)] = 1
+        return classification_metrics(y, forced, names)
 
     monkeypatch.setattr(train_diagnosis, "classification_metrics", forced_false_alarms)
     monkeypatch.setattr(train_diagnosis, "promotion_gate", lambda *args: {
@@ -306,6 +353,7 @@ def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path, monkeyp
     constrained = train_candidates(tmp_path, tmp_path / "constrained", champion, rounds=2,
                                    normal_ratios=(3,), weight_modes=("unweighted",), data_kind="synthetic_fixture")
     assert not constrained["selection_constraint_met"]
+    assert constrained["selection_decision"]["selection_pool"] == "unconstrained_fallback"
     assert not constrained["promotion"]["eligible"]
     assert "selection_false_alarm_limit" in constrained["promotion"]["reasons"]
 
