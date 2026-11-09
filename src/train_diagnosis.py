@@ -17,7 +17,7 @@ import sklearn
 
 from diagnosis_evaluation import (asset_holdout, class_weights, classification_metrics, macro_f1_eval,
                                   promotion_gate, select_candidate)
-from pdm_runtime import MODEL_DYN_IDX, load_booster, make_feature_matrix
+from pdm_runtime import FEATURE_BATCH_ROWS, MODEL_DYN_IDX, load_booster, make_feature_matrix_batched
 
 ROOT = Path(__file__).resolve().parents[1]
 NORMAL_RATIOS = (None, 2, 3, 5)
@@ -56,7 +56,7 @@ def load_dataset(path: Path, *, with_features: bool = True) -> dict:
            for group in rows["groups"]):
         raise ValueError("asset IDs must be nonempty, trimmed, and nonmissing")
     if with_features:
-        rows["features"] = make_feature_matrix(rows["X"], rows["S"])
+        rows["features"] = make_feature_matrix_batched(rows["X"], rows["S"])
     return rows
 
 
@@ -227,10 +227,13 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                            "patience": EARLY_STOPPING_ROUNDS, "default_metric_disabled": True,
                            "builtin_metrics_disabled": iteration_metric == "macro_f1",
                            "training_objective": "multiclass"}
+    feature_construction = {"mode": "batched", "max_batch_rows": FEATURE_BATCH_ROWS,
+                            "dtype": "float32", "n_features": 249}
     output.mkdir(parents=True, exist_ok=True)
     record_event(output, "run_started", seed=seed, rounds=rounds, lineage=lineage,
                  normal_ratios=list(normal_ratios), weight_modes=list(weight_modes), environment=environment,
-                 iteration_selection=iteration_selection, max_false_alarm=max_false_alarm)
+                 iteration_selection=iteration_selection, max_false_alarm=max_false_alarm,
+                 feature_construction=feature_construction)
     experiments = []
     for ratio in normal_ratios:
         indices = training_rows(train["y"], fit, normal, seed, ratio)
@@ -290,6 +293,7 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
         "schema": "servicerobot.diagnosis.experiment.v2", "seed": seed,
         "lineage": lineage, "environment": environment,
         "iteration_selection": iteration_selection,
+        "feature_construction": feature_construction,
         "search_space": {"normal_ratios": list(normal_ratios), "weight_modes": list(weight_modes),
                          "candidate_count": len(experiments), "rounds": rounds},
         "selection_protocol": "robot_group_holdout", "official_validation_used_for_selection": False,

@@ -43,7 +43,7 @@ def test_audit_reports_ready_without_features_training_or_model_mutation(robot_d
         pytest.fail("preflight must not train, infer, or build the full feature matrix")
 
     before = (SERVING / "robot_pdm_enhanced.txt").read_bytes()
-    monkeypatch.setattr(train_diagnosis, "make_feature_matrix", unexpected)
+    monkeypatch.setattr(train_diagnosis, "make_feature_matrix_batched", unexpected)
     monkeypatch.setattr(train_diagnosis, "train_candidates", unexpected)
     monkeypatch.setattr(train_diagnosis, "load_booster", unexpected)
     report = audit_training_data(robot_data, SERVING, data_kind="synthetic_fixture")

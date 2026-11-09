@@ -10,7 +10,7 @@ import zipfile
 from lightgbm.basic import LightGBMError
 
 from diagnosis_evaluation import classification_metrics
-from pdm_runtime import load_booster, make_feature_matrix as feat
+from pdm_runtime import FEATURE_BATCH_ROWS, load_booster, make_feature_matrix_batched as feat
 from train_diagnosis import (DATA_KINDS, dataset_support, file_sha256, load_dataset,
                               validate_label_coverage, validate_metadata_contract)
 
@@ -42,6 +42,8 @@ def evaluate_saved_model(data_dir: Path, model_dir: Path, data_kind: str = "unsp
         "evaluated_at_utc": datetime.now(timezone.utc).isoformat(),
         "data_kind": data_kind, "data_kind_source": "caller_declared_not_independently_verified",
         "dataset_file": "enhanced_val.npz", "assets": len(set(dataset["groups"])),
+        "feature_construction": {"mode": "batched", "max_batch_rows": FEATURE_BATCH_ROWS,
+                                 "dtype": "float32", "n_features": 249},
         "per_class_support": dataset_support(dataset["y"], dataset["groups"], names),
         "input_sha256": {key: file_sha256(path) for key, path in files.items()},
         "code_sha256": {name: file_sha256(ROOT / "src" / name) for name in

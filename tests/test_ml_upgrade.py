@@ -254,6 +254,8 @@ def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path, monkeyp
     events = [json.loads(line) for line in (output / "training_events.jsonl").read_text().splitlines()]
     assert events[0]["event"] == "run_started"
     assert events[0]["max_false_alarm"] == .05
+    assert events[0]["feature_construction"] == report["feature_construction"] == {
+        "mode": "batched", "max_batch_rows": 4096, "dtype": "float32", "n_features": 249}
     assert events[-1]["event"] == "run_completed"
     assert sum(row["event"] == "candidate_completed" for row in events) == 12
     decision = report["selection_decision"]

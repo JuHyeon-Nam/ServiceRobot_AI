@@ -12,6 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 import evaluate_enhanced
+import pdm_runtime
 
 
 @pytest.fixture
@@ -52,6 +53,8 @@ def test_saved_evaluation_records_counts_and_hashes_without_mutating_inputs(save
     assert evidence["evaluated_at_utc"].endswith("+00:00")
     assert evidence["assets"] == 4
     assert evidence["dataset_file"] == "enhanced_val.npz"
+    assert evidence["feature_construction"] == {
+        "mode": "batched", "max_batch_rows": 4096, "dtype": "float32", "n_features": 249}
     assert not evidence["automatic_promotion"]
     assert "training_validation_asset_overlap_not_checked" in evidence["limitations"]
     assert "source_authenticity_not_verified" in evidence["limitations"]
@@ -241,3 +244,26 @@ def test_missing_input_is_a_cli_error_and_does_not_create_report(tmp_path, capsy
     assert error.value.code == 2
     assert "Diagnosis evaluation:" in capsys.readouterr().err
     assert not output.exists()
+
+
+def test_saved_evaluation_uses_bounded_feature_batches(saved_evaluation, monkeypatch):
+    data, models = saved_evaluation
+    path = data / "enhanced_val.npz"
+    with np.load(path, allow_pickle=False) as source:
+        arrays = {key: source[key] for key in source.files}
+    arrays = {key: np.concatenate([value] * 120, axis=0) for key, value in arrays.items()}
+    np.savez_compressed(path, **arrays)
+    before = input_bytes(data, models)
+    original = pdm_runtime.make_feature_matrix
+    calls = []
+
+    def tracked(windows, contexts):
+        calls.append(len(windows))
+        return original(windows, contexts)
+
+    monkeypatch.setattr(pdm_runtime, "make_feature_matrix", tracked)
+    report = evaluate_enhanced.evaluate_saved_model(data, models, "synthetic_fixture")
+    assert report["rows"] == 4320
+    assert calls == [4096, 224]
+    assert report["evaluation"]["feature_construction"]["max_batch_rows"] == 4096
+    assert input_bytes(data, models) == before

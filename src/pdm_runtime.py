@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+from numbers import Integral
 import time
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ import numpy as np
 
 
 MODEL_DYN_IDX = [0, 1, 4, 5, 6]  # batteryLevel, speed, degree, collision, obstacle
+FEATURE_BATCH_ROWS = 4096
 
 
 def make_feature_matrix(windows: Any, contexts: Any) -> np.ndarray:
@@ -38,6 +40,23 @@ def make_feature_matrix(windows: Any, contexts: Any) -> np.ndarray:
         np.abs(np.fft.rfft(x, axis=1))[:, :15, :].reshape(len(x), 75),
         static,
     ]).astype(np.float32)
+
+
+def make_feature_matrix_batched(windows: Any, contexts: Any,
+                                batch_size: int = FEATURE_BATCH_ROWS) -> np.ndarray:
+    """Bound offline conversion/FFT temporaries without changing the feature formula."""
+    if not isinstance(batch_size, Integral) or isinstance(batch_size, bool) or batch_size < 1:
+        raise ValueError("feature batch size must be a positive integer")
+    raw, static = np.asarray(windows), np.asarray(contexts)
+    if raw.ndim != 3 or raw.shape[1:] != (30, 7):
+        raise ValueError("sensor windows must have shape (n, 30, 7)")
+    if static.shape != (len(raw), 9):
+        raise ValueError("context features must have shape (n, 9)")
+    features = np.empty((len(raw), 249), dtype=np.float32)
+    for start in range(0, len(raw), batch_size):
+        stop = min(start + batch_size, len(raw))
+        features[start:stop] = make_feature_matrix(raw[start:stop], static[start:stop])
+    return features
 
 
 def load_booster(path: str | Path) -> lgb.Booster:
