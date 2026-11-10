@@ -27,7 +27,8 @@ ITERATION_METRICS = ("macro_f1", "multi_logloss")
 EARLY_STOPPING_ROUNDS = 40
 
 
-def load_dataset(path: Path, *, with_features: bool = True) -> dict:
+def load_dataset(path: Path, *, with_features: bool = True, keep_raw: bool = True) -> dict:
+    """Validate every raw array; optionally omit X/S from the returned working set."""
     with np.load(path, allow_pickle=False) as data:
         if not {"X", "S", "y", "groups"} <= set(data.files):
             raise ValueError("dataset needs X/S/y/groups; rebuild with build_enhanced_dataset.py")
@@ -57,6 +58,8 @@ def load_dataset(path: Path, *, with_features: bool = True) -> dict:
         raise ValueError("asset IDs must be nonempty, trimmed, and nonmissing")
     if with_features:
         rows["features"] = make_feature_matrix_batched(rows["X"], rows["S"])
+    if not keep_raw:
+        del rows["X"], rows["S"]
     return rows
 
 
@@ -123,6 +126,7 @@ def audit_training_data(data_dir: Path, champion_dir: Path, seed: int = 42,
               "audited_at_utc": datetime.now(timezone.utc).isoformat(),
               "data_kind": data_kind, "ready_for_candidate_comparison": False,
               "model_performance_evaluated": False, "issues": [], "splits": {},
+              "raw_sensor_arrays_retained": False,
               "limitations": ["source_authenticity_not_verified", "field_performance_not_evaluated",
                               "saved_booster_contents_not_validated", "engineered_features_not_evaluated"]}
     if data_kind not in DATA_KINDS:
@@ -151,7 +155,7 @@ def audit_training_data(data_dir: Path, champion_dir: Path, seed: int = 42,
         if not files[key].is_file():
             continue
         try:
-            rows = load_dataset(files[key], with_features=False)
+            rows = load_dataset(files[key], with_features=False, keep_raw=False)
             datasets[split] = rows
             report["splits"][split] = {"rows": len(rows["y"]), "assets": len(np.unique(rows["groups"]))}
             if names is not None:
@@ -200,7 +204,8 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
     if (not weight_modes or len(set(weight_modes)) != len(weight_modes)
             or any(m not in WEIGHT_MODES for m in weight_modes)):
         raise ValueError("weight modes must be unique supported values")
-    train, validation = load_dataset(data_dir / "enhanced_train.npz"), load_dataset(data_dir / "enhanced_val.npz")
+    train = load_dataset(data_dir / "enhanced_train.npz", keep_raw=False)
+    validation = load_dataset(data_dir / "enhanced_val.npz", keep_raw=False)
     overlap = sorted(set(train["groups"]) & set(validation["groups"]))
     if overlap:
         raise ValueError(f"official train/validation asset overlap: {overlap[:5]}")
@@ -228,7 +233,7 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                            "builtin_metrics_disabled": iteration_metric == "macro_f1",
                            "training_objective": "multiclass"}
     feature_construction = {"mode": "batched", "max_batch_rows": FEATURE_BATCH_ROWS,
-                            "dtype": "float32", "n_features": 249}
+                            "dtype": "float32", "n_features": 249, "raw_sensor_arrays_retained": False}
     output.mkdir(parents=True, exist_ok=True)
     record_event(output, "run_started", seed=seed, rounds=rounds, lineage=lineage,
                  normal_ratios=list(normal_ratios), weight_modes=list(weight_modes), environment=environment,

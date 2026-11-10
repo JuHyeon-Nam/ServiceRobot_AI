@@ -1,8 +1,10 @@
 """Saved-model evaluation safety using synthetic windows and a temporary Booster."""
 import hashlib
+import gc
 import json
 from pathlib import Path
 import sys
+import weakref
 from types import SimpleNamespace
 
 import lightgbm as lgb
@@ -54,7 +56,8 @@ def test_saved_evaluation_records_counts_and_hashes_without_mutating_inputs(save
     assert evidence["assets"] == 4
     assert evidence["dataset_file"] == "enhanced_val.npz"
     assert evidence["feature_construction"] == {
-        "mode": "batched", "max_batch_rows": 4096, "dtype": "float32", "n_features": 249}
+        "mode": "batched", "max_batch_rows": 4096, "dtype": "float32", "n_features": 249,
+        "raw_sensor_arrays_retained": False}
     assert not evidence["automatic_promotion"]
     assert "training_validation_asset_overlap_not_checked" in evidence["limitations"]
     assert "source_authenticity_not_verified" in evidence["limitations"]
@@ -266,4 +269,27 @@ def test_saved_evaluation_uses_bounded_feature_batches(saved_evaluation, monkeyp
     assert report["rows"] == 4320
     assert calls == [4096, 224]
     assert report["evaluation"]["feature_construction"]["max_batch_rows"] == 4096
+    assert input_bytes(data, models) == before
+
+
+def test_saved_evaluation_releases_raw_before_loading_booster(saved_evaluation, monkeypatch):
+    data, models = saved_evaluation
+    before = input_bytes(data, models)
+    original_features, original_booster = evaluate_enhanced.feat, evaluate_enhanced.load_booster
+    refs = []
+
+    def track_features(raw, static):
+        refs.extend([weakref.ref(raw), weakref.ref(static)])
+        return original_features(raw, static)
+
+    def check_before_booster(path):
+        gc.collect()
+        assert len(refs) == 2 and all(ref() is None for ref in refs)
+        return original_booster(path)
+
+    monkeypatch.setattr(evaluate_enhanced, "feat", track_features)
+    monkeypatch.setattr(evaluate_enhanced, "load_booster", check_before_booster)
+    report = evaluate_enhanced.evaluate_saved_model(data, models, "synthetic_fixture")
+    assert report["rows"] == 36
+    assert not report["evaluation"]["feature_construction"]["raw_sensor_arrays_retained"]
     assert input_bytes(data, models) == before

@@ -43,10 +43,23 @@ def test_audit_reports_ready_without_features_training_or_model_mutation(robot_d
         pytest.fail("preflight must not train, infer, or build the full feature matrix")
 
     before = (SERVING / "robot_pdm_enhanced.txt").read_bytes()
+    original_load = train_diagnosis.load_dataset
+    loaded_splits = []
+
+    def track_load(path, **kwargs):
+        assert kwargs == {"with_features": False, "keep_raw": False}
+        rows = original_load(path, **kwargs)
+        assert set(rows) == {"y", "groups"}
+        loaded_splits.append(path.name)
+        return rows
+
+    monkeypatch.setattr(train_diagnosis, "load_dataset", track_load)
     monkeypatch.setattr(train_diagnosis, "make_feature_matrix_batched", unexpected)
     monkeypatch.setattr(train_diagnosis, "train_candidates", unexpected)
     monkeypatch.setattr(train_diagnosis, "load_booster", unexpected)
     report = audit_training_data(robot_data, SERVING, data_kind="synthetic_fixture")
+    assert loaded_splits == ["enhanced_train.npz", "enhanced_val.npz"]
+    assert not report["raw_sensor_arrays_retained"]
     assert report["ready_for_candidate_comparison"]
     assert not report["model_performance_evaluated"]
     assert report["issues"] == []
@@ -66,14 +79,15 @@ def test_audit_lists_all_missing_inputs(tmp_path):
     assert all(issue["code"] == "missing_file" for issue in report["issues"])
 
 
-def test_numeric_validation_checks_values_after_the_first_batch(tmp_path):
+@pytest.mark.parametrize("keep_raw", [True, False])
+def test_numeric_validation_checks_values_after_the_first_batch(tmp_path, keep_raw):
     raw = np.zeros((4097, 30, 7), dtype=np.float32)
     raw[-1, -1, -1] = np.nan
     path = tmp_path / "last-batch.npz"
     np.savez(path, X=raw, S=np.zeros((4097, 9)), y=np.zeros(4097, dtype=int),
              groups=np.full(4097, "robot"))
     with pytest.raises(ValueError, match="finite"):
-        load_dataset(path, with_features=False)
+        load_dataset(path, with_features=False, keep_raw=keep_raw)
 
 
 @pytest.mark.parametrize("bad_group", ["", " ", "nan", "NaN", "None", "null", "NaT", " robot", "robot "])

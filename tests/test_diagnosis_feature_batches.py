@@ -1,13 +1,16 @@
 """Synthetic equivalence and batch-size bounds, not real-data RAM/performance claims."""
+import gc
 import hashlib
 from pathlib import Path
 import sys
+import weakref
 
 import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import pdm_runtime
+import train_diagnosis
 from train_diagnosis import load_dataset
 
 
@@ -124,3 +127,70 @@ def test_dataset_loader_uses_batches_and_preserves_npz_alignment(tmp_path, monke
     np.testing.assert_array_equal(loaded["y"], labels)
     np.testing.assert_array_equal(loaded["groups"], groups)
     assert hashlib.sha256(path.read_bytes()).hexdigest() == before
+
+
+@pytest.fixture
+def retention_windows(tmp_path):
+    rng = np.random.default_rng(31)
+    path = tmp_path / "retention-fixture.npz"
+    np.savez_compressed(path, X=rng.normal(size=(17, 30, 7)).astype(np.float32),
+                        S=rng.normal(size=(17, 9)).astype(np.float32), y=np.arange(17) % 9,
+                        groups=np.array([f"robot-{i % 4}" for i in range(17)]))
+    return path
+
+
+@pytest.mark.parametrize("with_features", [True, False])
+def test_lean_loading_preserves_labels_groups_features_and_file(retention_windows, with_features):
+    before = hashlib.sha256(retention_windows.read_bytes()).hexdigest()
+    full = load_dataset(retention_windows, with_features=with_features)
+    lean = load_dataset(retention_windows, with_features=with_features, keep_raw=False)
+    assert {"X", "S"} <= full.keys()
+    assert set(lean) == set(full) - {"X", "S"}
+    for key in lean:
+        np.testing.assert_array_equal(lean[key], full[key])
+    assert ("features" in lean) == with_features
+    assert hashlib.sha256(retention_windows.read_bytes()).hexdigest() == before
+
+
+@pytest.mark.parametrize("keep_raw", [True, False])
+def test_loaded_sensor_arrays_can_be_collected_when_not_retained(retention_windows, monkeypatch, keep_raw):
+    original = train_diagnosis.make_feature_matrix_batched
+    refs = []
+
+    def tracked(raw, static):
+        refs.extend([weakref.ref(raw), weakref.ref(static)])
+        return original(raw, static)
+
+    monkeypatch.setattr(train_diagnosis, "make_feature_matrix_batched", tracked)
+    result = load_dataset(retention_windows, keep_raw=keep_raw)
+    gc.collect()
+    assert len(refs) == 2
+    if keep_raw:
+        assert refs[0]() is result["X"] and refs[1]() is result["S"]
+    else:
+        assert all(ref() is None for ref in refs)
+        assert result["features"].shape == (17, 249)
+
+
+@pytest.mark.parametrize("with_features", [True, False])
+@pytest.mark.parametrize("kind,message", [("sensor_nan", "must be finite"), ("context_inf", "must be finite"),
+                                           ("missing_asset", "asset IDs"), ("float_label", "class labels")])
+def test_lean_loading_does_not_skip_raw_input_validation(retention_windows, monkeypatch, with_features, kind, message):
+    with np.load(retention_windows, allow_pickle=False) as source:
+        arrays = {key: source[key] for key in source.files}
+    if kind == "sensor_nan":
+        arrays["X"][-1, -1, -1] = np.nan
+    elif kind == "context_inf":
+        arrays["S"][-1, -1] = np.inf
+    elif kind == "missing_asset":
+        arrays["groups"] = np.full(17, "null")
+    else:
+        arrays["y"] = arrays["y"].astype(float)
+    np.savez_compressed(retention_windows, **arrays)
+
+    def forbidden(*args):
+        pytest.fail("invalid raw input must be rejected before feature computation")
+
+    monkeypatch.setattr(train_diagnosis, "make_feature_matrix_batched", forbidden)
+    with pytest.raises(ValueError, match=message):
+        load_dataset(retention_windows, with_features=with_features, keep_raw=False)

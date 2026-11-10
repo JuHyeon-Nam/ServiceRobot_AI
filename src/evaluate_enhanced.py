@@ -33,6 +33,7 @@ def evaluate_saved_model(data_dir: Path, model_dir: Path, data_kind: str = "unsp
     dataset = load_dataset(files["validation_windows"], with_features=False)
     validate_label_coverage(dataset["y"], names, "validation")
     features = feat(dataset["X"], dataset["S"])
+    del dataset["X"], dataset["S"]
     booster = load_booster(files["model"])
     if booster.num_feature() != 249 or booster.num_model_per_iteration() != len(names):
         raise ValueError("saved booster and class/feature metadata differ")
@@ -43,7 +44,7 @@ def evaluate_saved_model(data_dir: Path, model_dir: Path, data_kind: str = "unsp
         "data_kind": data_kind, "data_kind_source": "caller_declared_not_independently_verified",
         "dataset_file": "enhanced_val.npz", "assets": len(set(dataset["groups"])),
         "feature_construction": {"mode": "batched", "max_batch_rows": FEATURE_BATCH_ROWS,
-                                 "dtype": "float32", "n_features": 249},
+                                 "dtype": "float32", "n_features": 249, "raw_sensor_arrays_retained": False},
         "per_class_support": dataset_support(dataset["y"], dataset["groups"], names),
         "input_sha256": {key: file_sha256(path) for key, path in files.items()},
         "code_sha256": {name: file_sha256(ROOT / "src" / name) for name in

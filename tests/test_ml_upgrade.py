@@ -231,6 +231,8 @@ def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path, monkeyp
     evaluated_rows = []
     selection_snapshots = []
     original_record_event = train_diagnosis.record_event
+    original_load_dataset = train_diagnosis.load_dataset
+    loaded_splits = []
 
     def track_metrics(y, probabilities, names):
         evaluated_rows.append(len(y))
@@ -241,10 +243,19 @@ def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path, monkeyp
             selection_snapshots.append(list(evaluated_rows))
         original_record_event(output, event, **fields)
 
+    def track_load(path, **kwargs):
+        assert kwargs == {"keep_raw": False}
+        result = original_load_dataset(path, **kwargs)
+        assert set(result) == {"y", "groups", "features"}
+        loaded_splits.append(path.name)
+        return result
+
     monkeypatch.setattr(train_diagnosis, "classification_metrics", track_metrics)
     monkeypatch.setattr(train_diagnosis, "record_event", track_event)
+    monkeypatch.setattr(train_diagnosis, "load_dataset", track_load)
     output = tmp_path / "candidate"
     report = train_candidates(tmp_path, output, champion, rounds=2, data_kind="synthetic_fixture")
+    assert loaded_splits == ["enhanced_train.npz", "enhanced_val.npz"]
     assert len(report["experiments"]) == 12
     assert report["schema"] == "servicerobot.diagnosis.experiment.v2"
     assert report["lineage"]["data_kind"] == "synthetic_fixture"
@@ -255,7 +266,8 @@ def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path, monkeyp
     assert events[0]["event"] == "run_started"
     assert events[0]["max_false_alarm"] == .05
     assert events[0]["feature_construction"] == report["feature_construction"] == {
-        "mode": "batched", "max_batch_rows": 4096, "dtype": "float32", "n_features": 249}
+        "mode": "batched", "max_batch_rows": 4096, "dtype": "float32", "n_features": 249,
+        "raw_sensor_arrays_retained": False}
     assert events[-1]["event"] == "run_completed"
     assert sum(row["event"] == "candidate_completed" for row in events) == 12
     decision = report["selection_decision"]
