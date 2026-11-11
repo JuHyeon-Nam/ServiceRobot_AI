@@ -234,12 +234,15 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                            "training_objective": "multiclass"}
     feature_construction = {"mode": "batched", "max_batch_rows": FEATURE_BATCH_ROWS,
                             "dtype": "float32", "n_features": 249, "raw_sensor_arrays_retained": False}
+    model_retention = {"strategy": "selection_leader_only", "max_completed_models_between_candidates": 1,
+                       "all_candidate_metrics_retained": True}
     output.mkdir(parents=True, exist_ok=True)
     record_event(output, "run_started", seed=seed, rounds=rounds, lineage=lineage,
                  normal_ratios=list(normal_ratios), weight_modes=list(weight_modes), environment=environment,
                  iteration_selection=iteration_selection, max_false_alarm=max_false_alarm,
-                 feature_construction=feature_construction)
+                 feature_construction=feature_construction, candidate_model_retention=model_retention)
     experiments = []
+    retained_model, retained_candidate, selection_decision = None, None, None
     for ratio in normal_ratios:
         indices = training_rows(train["y"], fit, normal, seed, ratio)
         for mode in weight_modes:
@@ -273,17 +276,26 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                                          "values": history["robot_holdout"][iteration_metric]},
                    "elapsed_sec": round(time.perf_counter() - started, 4)}
             record_event(output, "candidate_completed", **row)
-            experiments.append({**row, "model": model})
-    try:
-        selection_decision = select_candidate({row["candidate_id"]: row["selection_metrics"]
-                                               for row in experiments}, max_false_alarm)
-    except ValueError as error:
-        record_event(output, "selection_failed", error_type=type(error).__name__, detail=str(error))
-        raise
+            experiments.append(row)
+            try:
+                selection_decision = select_candidate({entry["candidate_id"]: entry["selection_metrics"]
+                                                       for entry in experiments}, max_false_alarm)
+                selected = selection_decision["selected_candidate"]
+                if selected == candidate_id:
+                    retained_model, retained_candidate = model, candidate_id
+                elif selected != retained_candidate:
+                    raise ValueError("selection policy selected a previously discarded candidate model")
+            except ValueError as error:
+                record_event(output, "selection_failed", error_type=type(error).__name__, detail=str(error))
+                raise
+            # A losing prefix candidate cannot win later under the fixed ranking policy.
+            del model
+    if retained_model is None or selection_decision is None:
+        raise RuntimeError("candidate search completed without a retained model")
     selection_decision["dataset"] = "training_robot_holdout"
     winner = next(row for row in experiments if row["candidate_id"] == selection_decision["selected_candidate"])
     record_event(output, "candidate_selected", **selection_decision)
-    model = winner["model"]
+    model = retained_model
     candidate_metrics = classification_metrics(validation["y"], model.predict_proba(validation_features), names)
     champion = load_booster(champion_dir / "robot_pdm_enhanced.txt")
     champion_metrics = classification_metrics(validation["y"], champion.predict(validation["features"]), names)
@@ -299,6 +311,7 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
         "lineage": lineage, "environment": environment,
         "iteration_selection": iteration_selection,
         "feature_construction": feature_construction,
+        "candidate_model_retention": model_retention,
         "search_space": {"normal_ratios": list(normal_ratios), "weight_modes": list(weight_modes),
                          "candidate_count": len(experiments), "rounds": rounds},
         "selection_protocol": "robot_group_holdout", "official_validation_used_for_selection": False,
@@ -309,7 +322,7 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                             "fit": dataset_support(train["y"][fit], train["groups"][fit], names),
                             "selection": dataset_support(train["y"][selection], train["groups"][selection], names),
                             "official_validation": dataset_support(validation["y"], validation["groups"], names)},
-        "experiments": [{key: value for key, value in row.items() if key != "model"} for row in experiments],
+        "experiments": experiments,
         "selected_mode": winner["mode"], "selected_candidate": winner["candidate_id"],
         "selected_normal_ratio": winner["normal_ratio"],
         "selection_constraint_met": selection_decision["constraint_met"], "selection_decision": selection_decision,
