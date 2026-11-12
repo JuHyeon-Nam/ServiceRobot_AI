@@ -6,7 +6,7 @@ build_enhanced_dataset.py
 - zip을 디스크에 풀지 않고 메모리 스트리밍으로 파싱
 - 동적 센서 7개는 30시점 시퀀스로, 정적/누적/맥락 피처 9개는 윈도우 끝 값으로 부착
 
-출력: --out-dir의 enhanced_{train,val}.npz (X, S, y, groups, target_times)
+출력: 새 --out-dir의 enhanced_{train,val}.npz (X, S, y, groups, target_times)
 """
 import argparse
 from math import isfinite
@@ -142,7 +142,8 @@ def main(argv=None):
     parser.add_argument("--base-dir", required=True, type=Path,
                         help="AI-Hub directory containing Training and Validation")
     parser.add_argument("--out-dir", type=Path,
-                        default=Path(__file__).resolve().parents[1] / "data/datasets/robot-v2")
+                        default=Path(__file__).resolve().parents[1] / "data/datasets/robot-v2",
+                        help="new directory for this build; existing paths and symlinks are rejected")
     parser.add_argument("--max-gap-seconds", type=float,
                         help="exclude windows crossing larger observation gaps; unset disables gap filtering")
     args = parser.parse_args(argv)
@@ -150,7 +151,9 @@ def main(argv=None):
         _gap_threshold(args.max_gap_seconds)
     except ValueError as error:
         parser.error(str(error))
-    BASE, OUT = str(args.base_dir), str(args.out_dir)
+    BASE, OUT = str(args.base_dir), args.out_dir
+    if OUT.exists() or OUT.is_symlink():
+        parser.error(f"--out-dir must be a new directory, not an existing path or symlink: {OUT}")
     print("== Training 추출 ==", flush=True)
     tr_dev, dt1, ms1 = read_split(os.path.join(BASE, "Training", "02.라벨링데이터"), "train")
     print("== Validation 추출 ==", flush=True)
@@ -223,21 +226,27 @@ def main(argv=None):
     print(f"train: X{Xtr.shape} S{Str.shape} y{ytr.shape}", flush=True)
     print(f"val:   X{Xva.shape} S{Sva.shape} y{yva.shape}", flush=True)
 
-    os.makedirs(OUT, exist_ok=True)
-    np.savez_compressed(f"{OUT}/enhanced_train.npz", X=Xtr, S=Str, y=ytr, groups=Gtr, target_times=Ttr)
-    np.savez_compressed(f"{OUT}/enhanced_val.npz", X=Xva, S=Sva, y=yva, groups=Gva, target_times=Tva)
-    json.dump({"err_map": err_map, "devtype_map": devtype_map,
-               "mainstate_map": mainstate_map, "crowd_map": CROWD,
-               "dyn": DYN, "stat": STAT_NUM + ["deviceType", "mainState"],
-               "window_contract": {"history": "30 observations before target", "context": "at target time"},
-               "sequence_audit": sequence_audit,
-               "asset_audit": {"train": sorted(map(str, tr_dev)), "validation": sorted(map(str, va_dev)), "overlap": 0}},
-              open(f"{OUT}/enhanced_meta.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    # Claim the destination again after parsing; never merge with another build's files.
+    OUT.mkdir(parents=True, exist_ok=False)
+    with (OUT / "enhanced_train.npz").open("xb") as stream:
+        np.savez_compressed(stream, X=Xtr, S=Str, y=ytr, groups=Gtr, target_times=Ttr)
+    with (OUT / "enhanced_val.npz").open("xb") as stream:
+        np.savez_compressed(stream, X=Xva, S=Sva, y=yva, groups=Gva, target_times=Tva)
 
     # 대시보드 재생용: val 윈도우와 1:1 정렬된 표시정보(enhanced_val.npz와 index 동일)
     dd = pd.DataFrame(disp, columns=["robot", "deviceType", "x", "y", "degree", "errorCode"])
     dd["validx"] = np.arange(len(dd))
-    dd.to_parquet(f"{OUT}/replay_display.parquet", index=False)
+    with (OUT / "replay_display.parquet").open("xb") as stream:
+        dd.to_parquet(stream, index=False)
+    # Publish metadata last so earlier write failures cannot leave usable build metadata.
+    with (OUT / "enhanced_meta.json").open("x", encoding="utf-8") as stream:
+        json.dump({"err_map": err_map, "devtype_map": devtype_map,
+                   "mainstate_map": mainstate_map, "crowd_map": CROWD,
+                   "dyn": DYN, "stat": STAT_NUM + ["deviceType", "mainState"],
+                   "window_contract": {"history": "30 observations before target", "context": "at target time"},
+                   "sequence_audit": sequence_audit,
+                   "asset_audit": {"train": sorted(map(str, tr_dev)), "validation": sorted(map(str, va_dev)), "overlap": 0}},
+                  stream, ensure_ascii=False, indent=1)
     print(f"저장 완료: enhanced_* / replay_display.parquet ({len(dd)}행, {dd.robot.nunique()}대)", flush=True)
 
 

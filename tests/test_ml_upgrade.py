@@ -209,7 +209,7 @@ def test_dataset_builder_preserves_asset_identity(tmp_path):
         archive.writestr("overlap.json", json.dumps({"deviceId": "robot-A", "deviceType": "robot",
             "errorData": {"errorCode": "정상"}, "deviceData": {"mainState": "MOVE"}}))
     with pytest.raises(ValueError, match="overlap"):
-        main(["--base-dir", str(tmp_path), "--out-dir", str(out)])
+        main(["--base-dir", str(tmp_path), "--out-dir", str(tmp_path / "overlap-output")])
 
 
 def test_candidate_training_on_fixture_does_not_touch_champion(tmp_path, monkeypatch):

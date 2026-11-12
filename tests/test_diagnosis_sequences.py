@@ -182,3 +182,218 @@ def test_last_update_time_fallback_is_preserved():
     ordered, _, audit = builder.prepare_sequence(rows, "robot-a")
     assert ordered[0]["createdAt"].endswith("00Z")
     assert audit["timestamp_basis"] == "utc"
+
+
+def snapshot_tree(root):
+    return {str(path.relative_to(root)):
+            ("symlink", str(path.readlink())) if path.is_symlink() else
+            ("directory", None) if path.is_dir() else ("file", path.read_bytes())
+            for path in root.rglob("*")}
+
+
+@pytest.fixture
+def build_source(tmp_path):
+    source = tmp_path / "source"
+    start = pd.Timestamp("2026-01-01T00:00:00Z")
+    write_archives(source, [(start + pd.Timedelta(seconds=i)).isoformat() for i in range(35)])
+    return source
+
+
+@pytest.mark.parametrize("kind", ["empty", "dataset", "unrelated", "file", "directory_link",
+                                    "file_link", "dangling_link"])
+def test_existing_output_paths_are_rejected_before_reading_archives(tmp_path, monkeypatch, kind, capsys):
+    output, target = tmp_path / "output", tmp_path / "target"
+    if kind in {"empty", "dataset", "unrelated"}:
+        output.mkdir()
+        if kind == "dataset":
+            for name in ("enhanced_train.npz", "enhanced_val.npz", "enhanced_meta.json",
+                         "replay_display.parquet"):
+                (output / name).write_bytes(b"existing dataset")
+        elif kind == "unrelated":
+            (output / "notes.txt").write_bytes(b"user notes")
+    elif kind == "file":
+        output.write_bytes(b"existing file")
+    else:
+        if kind == "directory_link":
+            target.mkdir()
+            (target / "enhanced_meta.json").write_bytes(b"existing metadata")
+        elif kind == "file_link":
+            target.write_bytes(b"existing file")
+        output.symlink_to(target)
+    before = snapshot_tree(tmp_path)
+
+    def forbidden(*args):
+        pytest.fail("existing output must be rejected before archive IO")
+
+    monkeypatch.setattr(builder, "read_split", forbidden)
+    with pytest.raises(SystemExit) as error:
+        builder.main(["--base-dir", str(tmp_path / "missing-source"), "--out-dir", str(output)])
+    assert error.value.code == 2
+    assert "--out-dir must be a new directory" in capsys.readouterr().err
+    assert snapshot_tree(tmp_path) == before
+
+
+def test_operating_model_directory_is_rejected_without_mutation(tmp_path, monkeypatch):
+    serving = Path(__file__).resolve().parents[1] / "data/processed"
+    before = snapshot_tree(serving)
+
+    def forbidden(*args):
+        pytest.fail("operating model directory must be rejected before archive IO")
+
+    monkeypatch.setattr(builder, "read_split", forbidden)
+    with pytest.raises(SystemExit) as error:
+        builder.main(["--base-dir", str(tmp_path), "--out-dir", str(serving)])
+    assert error.value.code == 2
+    assert snapshot_tree(serving) == before
+
+
+@pytest.mark.parametrize("kind", ["directory", "empty_directory", "file", "symlink"])
+def test_output_created_during_parsing_is_not_reused(build_source, tmp_path, monkeypatch, kind):
+    output, target = tmp_path / "output", tmp_path / "target"
+    target.mkdir()
+    (target / "enhanced_meta.json").write_bytes(b"existing target")
+    original_read = builder.read_split
+    after_race = None
+
+    def create_output_during_read(folder, tag):
+        nonlocal after_race
+        result = original_read(folder, tag)
+        if tag == "val":
+            if kind in {"directory", "empty_directory"}:
+                output.mkdir()
+                if kind == "directory":
+                    (output / "notes.txt").write_bytes(b"other build")
+            elif kind == "file":
+                output.write_bytes(b"other file")
+            else:
+                output.symlink_to(target)
+            after_race = snapshot_tree(tmp_path)
+        return result
+
+    monkeypatch.setattr(builder, "read_split", create_output_during_read)
+    with pytest.raises(FileExistsError):
+        builder.main(["--base-dir", str(build_source), "--out-dir", str(output)])
+    assert after_race is not None
+    assert snapshot_tree(tmp_path) == after_race
+
+
+@pytest.mark.parametrize("filename", ["enhanced_train.npz", "enhanced_val.npz", "replay_display.parquet",
+                                        "enhanced_meta.json"])
+@pytest.mark.parametrize("symlink", [False, True])
+def test_file_collision_after_directory_claim_never_truncates_existing_content(
+        build_source, tmp_path, monkeypatch, filename, symlink):
+    output = tmp_path / "output"
+    target = tmp_path / "user-file"
+    target.write_bytes(b"preserve these bytes")
+    original_mkdir = Path.mkdir
+
+    def inject_file(path, *args, **kwargs):
+        result = original_mkdir(path, *args, **kwargs)
+        if path == output:
+            collision = path / filename
+            if symlink:
+                collision.symlink_to(target)
+            else:
+                collision.write_bytes(b"preserve these bytes")
+        return result
+
+    monkeypatch.setattr(Path, "mkdir", inject_file)
+    with pytest.raises(FileExistsError):
+        builder.main(["--base-dir", str(build_source), "--out-dir", str(output)])
+    assert (output / filename).read_bytes() == b"preserve these bytes"
+    assert (output / filename).is_symlink() == symlink
+    assert target.read_bytes() == b"preserve these bytes"
+    if filename != "enhanced_meta.json":
+        assert not (output / "enhanced_meta.json").exists()
+
+
+@pytest.mark.parametrize("stage", ["train", "val", "replay"])
+def test_write_failure_keeps_partial_outputs_but_no_metadata_or_success(
+        build_source, tmp_path, monkeypatch, capsys, stage):
+    output = tmp_path / "output"
+    original_save = builder.np.savez_compressed
+    source_before = snapshot_tree(build_source)
+
+    def interrupted_npz(stream, **arrays):
+        if Path(stream.name).name == f"enhanced_{stage}.npz":
+            stream.write(b"partial archive")
+            raise OSError("simulated write failure")
+        return original_save(stream, **arrays)
+
+    def interrupted_parquet(frame, stream, **kwargs):
+        stream.write(b"partial parquet")
+        raise OSError("simulated write failure")
+
+    monkeypatch.setattr(builder.np, "savez_compressed", interrupted_npz)
+    if stage == "replay":
+        monkeypatch.setattr(builder.pd.DataFrame, "to_parquet", interrupted_parquet)
+    with pytest.raises(OSError, match="simulated write failure"):
+        builder.main(["--base-dir", str(build_source), "--out-dir", str(output)])
+    assert output.is_dir()
+    assert any(output.iterdir())
+    assert not (output / "enhanced_meta.json").exists()
+    assert "저장 완료" not in capsys.readouterr().out
+    before_retry = snapshot_tree(output)
+    with pytest.raises(SystemExit) as error:
+        builder.main(["--base-dir", str(build_source), "--out-dir", str(output)])
+    assert error.value.code == 2
+    assert snapshot_tree(output) == before_retry
+    assert snapshot_tree(build_source) == source_before
+
+
+def test_success_writes_metadata_last_and_refuses_repeat_build(build_source, tmp_path, monkeypatch, capsys):
+    output = tmp_path / "nested" / "new-build"
+    source_before = snapshot_tree(build_source)
+    original_parquet = builder.pd.DataFrame.to_parquet
+    replay_calls = []
+
+    def verify_write_order(frame, stream, **kwargs):
+        assert not (output / "enhanced_meta.json").exists()
+        for name in ("train", "val"):
+            with np.load(output / f"enhanced_{name}.npz", allow_pickle=False) as arrays:
+                assert set(arrays.files) == {"X", "S", "y", "groups", "target_times"}
+                assert arrays["X"].shape == (5, 30, 7)
+                assert arrays["S"].shape == (5, 9)
+        replay_calls.append(stream.name)
+        return original_parquet(frame, stream, **kwargs)
+
+    monkeypatch.setattr(builder.pd.DataFrame, "to_parquet", verify_write_order)
+    args = ["--base-dir", str(build_source), "--out-dir", str(output)]
+    builder.main(args)
+    assert replay_calls == [str(output / "replay_display.parquet")]
+    assert set(path.name for path in output.iterdir()) == {
+        "enhanced_train.npz", "enhanced_val.npz", "enhanced_meta.json", "replay_display.parquet"}
+    assert json.loads((output / "enhanced_meta.json").read_text())["asset_audit"]["overlap"] == 0
+    assert pd.read_parquet(output / "replay_display.parquet").validx.tolist() == list(range(5))
+    assert "저장 완료" in capsys.readouterr().out
+    before_retry = snapshot_tree(output)
+    with pytest.raises(SystemExit) as error:
+        builder.main(args)
+    assert error.value.code == 2
+    assert snapshot_tree(output) == before_retry
+    assert snapshot_tree(build_source) == source_before
+
+
+def test_metadata_write_failure_is_not_reported_as_success_or_retried_in_place(
+        build_source, tmp_path, monkeypatch, capsys):
+    output = tmp_path / "output"
+    source_before = snapshot_tree(build_source)
+
+    def interrupted_metadata(value, stream, **kwargs):
+        stream.write('{"err_map":')
+        raise OSError("simulated metadata failure")
+
+    monkeypatch.setattr(builder.json, "dump", interrupted_metadata)
+    args = ["--base-dir", str(build_source), "--out-dir", str(output)]
+    with pytest.raises(OSError, match="simulated metadata failure"):
+        builder.main(args)
+    assert "저장 완료" not in capsys.readouterr().out
+    with pytest.raises(json.JSONDecodeError):
+        json.loads((output / "enhanced_meta.json").read_text())
+    assert len(pd.read_parquet(output / "replay_display.parquet")) == 5
+    before_retry = snapshot_tree(output)
+    with pytest.raises(SystemExit) as error:
+        builder.main(args)
+    assert error.value.code == 2
+    assert snapshot_tree(output) == before_retry
+    assert snapshot_tree(build_source) == source_before
