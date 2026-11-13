@@ -255,9 +255,9 @@ def test_output_created_during_parsing_is_not_reused(build_source, tmp_path, mon
     original_read = builder.read_split
     after_race = None
 
-    def create_output_during_read(folder, tag):
+    def create_output_during_read(folder, tag, **kwargs):
         nonlocal after_race
-        result = original_read(folder, tag)
+        result = original_read(folder, tag, **kwargs)
         if tag == "val":
             if kind in {"directory", "empty_directory"}:
                 output.mkdir()

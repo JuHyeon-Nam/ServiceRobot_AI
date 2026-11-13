@@ -15,10 +15,12 @@ import os, glob, zipfile, json
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 WIN = 30
 CROWD = {"LOW": 0, "MIDDLE": 1, "HIGH": 2}
+INGEST_SKIP_REASONS = ("invalid_utf8", "invalid_json", "record_parse_error",
+                       "missing_error_code", "not_assigned_error_code")
 
 # 동적 센서(시점마다 변함) -> 시퀀스로
 DYN = ["batteryLevel", "speed", "x", "y", "degree", "collision", "obstacle"]
@@ -61,28 +63,70 @@ def parse_record(d):
     return rec
 
 
-def read_split(folder, tag):
+def read_split(folder, tag, *, audit=None):
+    """Read JSON ZIP entries once; publish counts only after a complete split."""
     zips = sorted(glob.glob(os.path.join(folder, "*.zip")))
     if not zips:
         raise FileNotFoundError(f"no AI-Hub JSON archives in {folder}")
     by_dev = defaultdict(list)
     devtypes, mainstates = set(), set()
-    n = 0
+    n, archives = 0, []
     for zi, zp in enumerate(zips):
+        entry = {"archive": os.path.basename(zp), "members": 0, "json_members": 0,
+                 "non_json_members": 0, "accepted_records": 0, "accepted_by_class": {},
+                 "skipped_json": dict.fromkeys(INGEST_SKIP_REASONS, 0)}
         with zipfile.ZipFile(zp) as zf:
-            for nm in zf.namelist():
-                if not nm.endswith(".json"):
+            for member in zf.infolist():
+                entry["members"] += 1
+                if not member.filename.endswith(".json"):
+                    entry["non_json_members"] += 1
+                    continue
+                entry["json_members"] += 1
+                # Archive/CRC/read failures are not malformed-record skips.
+                payload = zf.read(member)
+                try:
+                    text = payload.decode("utf-8")
+                except UnicodeDecodeError:
+                    entry["skipped_json"]["invalid_utf8"] += 1
                     continue
                 try:
-                    rec = parse_record(json.loads(zf.read(nm).decode("utf-8")))
-                except Exception:
+                    document = json.loads(text)
+                except json.JSONDecodeError:
+                    entry["skipped_json"]["invalid_json"] += 1
                     continue
-                if rec["errorCode"] in (None, "NOT_ASSIGNED"):
+                try:
+                    rec = parse_record(document)
+                except (AttributeError, TypeError):
+                    entry["skipped_json"]["record_parse_error"] += 1
+                    continue
+                if rec["errorCode"] is None:
+                    entry["skipped_json"]["missing_error_code"] += 1
+                    continue
+                if rec["errorCode"] == "NOT_ASSIGNED":
+                    entry["skipped_json"]["not_assigned_error_code"] += 1
                     continue
                 by_dev[rec["deviceId"]].append(rec)
                 devtypes.add(rec["deviceType"]); mainstates.add(rec["mainState"])
+                code = rec["errorCode"]
+                entry["accepted_by_class"][code] = entry["accepted_by_class"].get(code, 0) + 1
+                entry["accepted_records"] += 1
                 n += 1
-        print(f"  [{tag}] {zi+1}/{len(zips)} {os.path.basename(zp)[:40]}  누적 {n}건", flush=True)
+        archives.append(entry)
+        skipped = sum(entry["skipped_json"].values())
+        print(f"  [{tag}] {zi+1}/{len(zips)} {entry['archive'][:40]}  "
+              f"JSON {entry['json_members']}건 / 제외 {skipped}건 / 누적 채택 {n}건", flush=True)
+    summary = {key: sum(entry[key] for entry in archives)
+               for key in ("members", "json_members", "non_json_members", "accepted_records")}
+    class_counts = Counter()
+    for entry in archives:
+        class_counts.update(entry["accepted_by_class"])
+    summary.update({"archive_count": len(archives), "archives": archives,
+                    "accepted_by_class": dict(class_counts),
+                    "skipped_json": {reason: sum(entry["skipped_json"][reason] for entry in archives)
+                                     for reason in INGEST_SKIP_REASONS}})
+    print(f"  [{tag}] JSON 제외 사유: {summary['skipped_json']}", flush=True)
+    if audit is not None:
+        audit.update(summary)
     return by_dev, devtypes, mainstates
 
 
@@ -154,10 +198,11 @@ def main(argv=None):
     BASE, OUT = str(args.base_dir), args.out_dir
     if OUT.exists() or OUT.is_symlink():
         parser.error(f"--out-dir must be a new directory, not an existing path or symlink: {OUT}")
+    train_ingestion, validation_ingestion = {}, {}
     print("== Training 추출 ==", flush=True)
-    tr_dev, dt1, ms1 = read_split(os.path.join(BASE, "Training", "02.라벨링데이터"), "train")
+    tr_dev, dt1, ms1 = read_split(os.path.join(BASE, "Training", "02.라벨링데이터"), "train", audit=train_ingestion)
     print("== Validation 추출 ==", flush=True)
-    va_dev, dt2, ms2 = read_split(os.path.join(BASE, "Validation", "02.라벨링데이터"), "val")
+    va_dev, dt2, ms2 = read_split(os.path.join(BASE, "Validation", "02.라벨링데이터"), "val", audit=validation_ingestion)
     overlap = set(tr_dev) & set(va_dev)
     if overlap:
         raise ValueError(f"official asset overlap: {sorted(map(str, overlap))[:5]}")
@@ -244,6 +289,9 @@ def main(argv=None):
                    "mainstate_map": mainstate_map, "crowd_map": CROWD,
                    "dyn": DYN, "stat": STAT_NUM + ["deviceType", "mainState"],
                    "window_contract": {"history": "30 observations before target", "context": "at target time"},
+                   "ingestion_audit": {"schema": "servicerobot.dataset.ingestion.v1",
+                                       "json_member_policy": "case_sensitive_.json_suffix; each_zip_entry",
+                                       "splits": {"train": train_ingestion, "validation": validation_ingestion}},
                    "sequence_audit": sequence_audit,
                    "asset_audit": {"train": sorted(map(str, tr_dev)), "validation": sorted(map(str, va_dev)), "overlap": 0}},
                   stream, ensure_ascii=False, indent=1)
