@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import sklearn
 
-from diagnosis_evaluation import (asset_holdout, class_weights, classification_metrics, macro_f1_eval,
+from diagnosis_evaluation import (asset_error_analysis, asset_holdout, class_weights, classification_metrics, macro_f1_eval,
                                   promotion_gate, select_candidate)
 from pdm_runtime import FEATURE_BATCH_ROWS, MODEL_DYN_IDX, load_booster, make_feature_matrix_batched
 
@@ -296,9 +296,17 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
     winner = next(row for row in experiments if row["candidate_id"] == selection_decision["selected_candidate"])
     record_event(output, "candidate_selected", **selection_decision)
     model = retained_model
-    candidate_metrics = classification_metrics(validation["y"], model.predict_proba(validation_features), names)
+    probabilities = model.predict_proba(validation_features)
+    candidate_metrics = classification_metrics(validation["y"], probabilities, names)
+    candidate_metrics["asset_error_analysis"] = asset_error_analysis(
+        validation["y"], probabilities.argmax(axis=1), validation["groups"], names)
+    del probabilities
     champion = load_booster(champion_dir / "robot_pdm_enhanced.txt")
-    champion_metrics = classification_metrics(validation["y"], champion.predict(validation["features"]), names)
+    probabilities = champion.predict(validation["features"])
+    champion_metrics = classification_metrics(validation["y"], probabilities, names)
+    champion_metrics["asset_error_analysis"] = asset_error_analysis(
+        validation["y"], probabilities.argmax(axis=1), validation["groups"], names)
+    del probabilities
     promotion = promotion_gate(champion_metrics, candidate_metrics, max_false_alarm)
     if not selection_decision["constraint_met"]:
         promotion["eligible"] = False

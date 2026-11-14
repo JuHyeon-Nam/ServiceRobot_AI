@@ -9,7 +9,7 @@ import zipfile
 
 from lightgbm.basic import LightGBMError
 
-from diagnosis_evaluation import classification_metrics
+from diagnosis_evaluation import asset_error_analysis, classification_metrics
 from pdm_runtime import FEATURE_BATCH_ROWS, load_booster, make_feature_matrix_batched as feat
 from train_diagnosis import (DATA_KINDS, dataset_support, file_sha256, load_dataset,
                               validate_label_coverage, validate_metadata_contract)
@@ -37,7 +37,11 @@ def evaluate_saved_model(data_dir: Path, model_dir: Path, data_kind: str = "unsp
     booster = load_booster(files["model"])
     if booster.num_feature() != 249 or booster.num_model_per_iteration() != len(names):
         raise ValueError("saved booster and class/feature metadata differ")
-    report = classification_metrics(dataset["y"], booster.predict(features), names)
+    probabilities = booster.predict(features)
+    report = classification_metrics(dataset["y"], probabilities, names)
+    report["asset_error_analysis"] = asset_error_analysis(
+        dataset["y"], probabilities.argmax(axis=1), dataset["groups"], names)
+    del probabilities
     report["evaluation"] = {
         "schema": "servicerobot.diagnosis.evaluation.v1",
         "evaluated_at_utc": datetime.now(timezone.utc).isoformat(),

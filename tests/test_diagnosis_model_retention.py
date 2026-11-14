@@ -40,7 +40,8 @@ def test_native_search_releases_losers_and_saves_the_exact_selected_model(candid
     before = (SERVING / "robot_pdm_enhanced.txt").read_bytes()
     original_classifier = train_diagnosis.lgb.LGBMClassifier
     original_event = train_diagnosis.record_event
-    refs, live_before_creation, model_texts = [], [], {}
+    original_analysis = train_diagnosis.asset_error_analysis
+    refs, live_before_creation, model_texts, analysis_calls = [], [], {}, []
 
     def tracked_classifier(*args, **kwargs):
         gc.collect()
@@ -58,8 +59,18 @@ def test_native_search_releases_losers_and_saves_the_exact_selected_model(candid
                 num_iteration=fields["best_iteration"])
         original_event(output, event, **fields)
 
+    def tracked_analysis(labels, predicted, groups, names):
+        events = [json.loads(line) for line in (output / "training_events.jsonl").read_text().splitlines()]
+        assert events[-1]["event"] == "candidate_selected"
+        assert len(model_texts) == 12
+        assert set(groups) == {f"val-{i}" for i in range(6)}
+        result = original_analysis(labels, predicted, groups, names)
+        analysis_calls.append(result)
+        return result
+
     monkeypatch.setattr(train_diagnosis.lgb, "LGBMClassifier", tracked_classifier)
     monkeypatch.setattr(train_diagnosis, "record_event", tracked_event)
+    monkeypatch.setattr(train_diagnosis, "asset_error_analysis", tracked_analysis)
     output = tmp_path / "candidate"
     report = train_diagnosis.train_candidates(candidate_data, output, SERVING, rounds=2,
                                                data_kind="synthetic_fixture")
@@ -67,6 +78,14 @@ def test_native_search_releases_losers_and_saves_the_exact_selected_model(candid
     assert live_before_creation == [0] + [1] * 11
     assert len(refs) == len(report["experiments"]) == len(model_texts) == 12
     assert len(set(model_texts.values())) > 1
+    assert len(analysis_calls) == 2
+    assert analysis_calls == [report["candidate"]["asset_error_analysis"], report["champion"]["asset_error_analysis"]]
+    for key in ("candidate", "champion"):
+        errors = report[key]["asset_error_analysis"]
+        assert errors["asset_count"] == 6
+        for metric in ("rows", "accuracy", "normal_false_alarm_rate", "fault_miss_rate", "confusion_matrix"):
+            assert errors["overall"][metric] == report[key][metric]
+    assert all("asset_error_analysis" not in row["selection_metrics"] for row in report["experiments"])
     assert all(ref() is None for ref in refs)
     assert all("model" not in row for row in report["experiments"])
     assert (output / "robot_pdm_enhanced.txt").read_text() == model_texts[report["selected_candidate"]]

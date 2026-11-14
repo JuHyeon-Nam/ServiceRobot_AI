@@ -59,6 +59,59 @@ def classification_metrics(y: np.ndarray, probabilities: np.ndarray, names: list
     }
 
 
+def asset_error_analysis(y: np.ndarray, predicted: np.ndarray, groups: np.ndarray, names: list[str]) -> dict:
+    """Describe window-level errors by robot; never use this as a selection score."""
+    if (not isinstance(names, list) or len(names) < 2 or "정상" not in names
+            or any(not isinstance(name, str) or not name.strip() for name in names)
+            or len(set(names)) != len(names)):
+        raise ValueError("asset error analysis requires unique class names including normal")
+    y, predicted, groups = np.asarray(y), np.asarray(predicted), np.asarray(groups)
+    if (y.ndim != 1 or not len(y) or predicted.shape != y.shape or groups.shape != y.shape):
+        raise ValueError("asset error analysis needs aligned nonempty label, prediction and robot arrays")
+    for labels in (y, predicted):
+        if labels.dtype.kind not in "iu" or (labels < 0).any() or (labels >= len(names)).any():
+            raise ValueError("asset error analysis needs integer class indices within class order")
+    if groups.dtype.kind not in "US":
+        raise ValueError("asset error analysis needs canonical string robot IDs")
+    groups = groups.astype(str, copy=False)
+    if any(not group.strip() or group != group.strip() or group.lower() in {"none", "null", "nan", "nat"}
+           for group in groups):
+        raise ValueError("asset error analysis needs canonical string robot IDs")
+
+    assets, inverse = np.unique(groups, return_inverse=True)
+    matrices = np.zeros((len(assets), len(names), len(names)), dtype=np.int64)
+    np.add.at(matrices, (inverse, y, predicted), 1)
+    normal = names.index("정상")
+
+    def summarize(matrix):
+        support = matrix.sum(axis=1)
+        rows, correct = int(support.sum()), int(np.trace(matrix))
+        normal_rows = int(support[normal])
+        false_alarms = normal_rows - int(matrix[normal, normal])
+        fault_rows = rows - normal_rows
+        fault_misses = int(matrix[:, normal].sum()) - int(matrix[normal, normal])
+        return {"rows": rows, "correct_rows": correct, "accuracy": round(correct / rows, 6),
+                "normal_rows": normal_rows, "normal_false_alarm_rows": false_alarms,
+                "normal_false_alarm_rate": round(false_alarms / normal_rows, 6) if normal_rows else None,
+                "fault_rows": fault_rows, "fault_miss_rows": fault_misses,
+                "fault_miss_rate": round(fault_misses / fault_rows, 6) if fault_rows else None,
+                "class_support": {name: int(support[i]) for i, name in enumerate(names)},
+                "fault_misses_by_class": {
+                    name: {"actual_rows": int(support[i]), "missed_as_normal_rows": int(matrix[i, normal]),
+                           "miss_rate": round(int(matrix[i, normal]) / int(support[i]), 6) if support[i] else None}
+                    for i, name in enumerate(names) if i != normal},
+                "confusion_matrix": matrix.tolist()}
+
+    per_asset = {str(asset): summarize(matrix) for asset, matrix in zip(assets, matrices)}
+    return {"schema": "servicerobot.diagnosis.asset_errors.v1", "class_order": list(names),
+            "unit": "sensor_windows", "grouping": "dataset_robot_id", "used_for_selection": False,
+            "asset_count": len(assets), "overall": summarize(matrices.sum(axis=0)), "per_asset": per_asset,
+            "assets_with_fault_misses": sum(row["fault_miss_rows"] > 0 for row in per_asset.values()),
+            "assets_with_normal_false_alarms": sum(row["normal_false_alarm_rows"] > 0 for row in per_asset.values()),
+            "limitations": ["window_counts_not_independent_failure_episodes", "robot_ids_not_independently_verified",
+                            "descriptive_not_causal_or_significance_test"]}
+
+
 def asset_holdout(labels: np.ndarray, groups: np.ndarray, seed: int = 42,
                   test_size: float = 0.2, require_all_classes: bool = False) -> tuple[np.ndarray, np.ndarray]:
     labels, groups = np.asarray(labels), np.asarray(groups).astype(str)

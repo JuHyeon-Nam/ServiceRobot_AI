@@ -64,6 +64,14 @@ def test_saved_evaluation_records_counts_and_hashes_without_mutating_inputs(save
     assert report["rows"] == sum(map(sum, report["confusion_matrix"])) == 36
     assert report["class_coverage"] == len(report["class_order"]) == 9
     assert set(report["per_class"]) == set(report["class_order"])
+    errors = report["asset_error_analysis"]
+    assert errors["asset_count"] == evidence["assets"] == 4
+    assert set(errors["per_asset"]) == {f"validation-{letter}" for letter in "abcd"}
+    assert not errors["used_for_selection"]
+    for key in ("rows", "accuracy", "normal_false_alarm_rate", "fault_miss_rate", "confusion_matrix"):
+        assert errors["overall"][key] == report[key]
+    np.testing.assert_array_equal(np.sum([row["confusion_matrix"] for row in errors["per_asset"].values()], axis=0),
+                                  report["confusion_matrix"])
     assert evidence["per_class_support"] == {name: {"rows": 4, "assets": 4} for name in report["class_order"]}
     expected_files = {"validation_windows": data / "enhanced_val.npz",
                       "dataset_metadata": data / "enhanced_meta.json",
