@@ -63,7 +63,7 @@ def parse_record(d):
     return rec
 
 
-def read_split(folder, tag, *, audit=None):
+def read_split(folder, tag, *, audit=None, reject_malformed_records=False):
     """Read JSON ZIP entries once; publish counts only after a complete split."""
     zips = sorted(glob.glob(os.path.join(folder, "*.zip")))
     if not zips:
@@ -86,18 +86,24 @@ def read_split(folder, tag, *, audit=None):
                 payload = zf.read(member)
                 try:
                     text = payload.decode("utf-8")
-                except UnicodeDecodeError:
+                except UnicodeDecodeError as error:
                     entry["skipped_json"]["invalid_utf8"] += 1
+                    if reject_malformed_records:
+                        raise ValueError(f"invalid_utf8 in {zp}::{member.filename}; malformed records rejected") from error
                     continue
                 try:
                     document = json.loads(text)
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as error:
                     entry["skipped_json"]["invalid_json"] += 1
+                    if reject_malformed_records:
+                        raise ValueError(f"invalid_json in {zp}::{member.filename}; malformed records rejected") from error
                     continue
                 try:
                     rec = parse_record(document)
-                except (AttributeError, TypeError):
+                except (AttributeError, TypeError) as error:
                     entry["skipped_json"]["record_parse_error"] += 1
+                    if reject_malformed_records:
+                        raise ValueError(f"record_parse_error in {zp}::{member.filename}; malformed records rejected") from error
                     continue
                 if rec["errorCode"] is None:
                     entry["skipped_json"]["missing_error_code"] += 1
@@ -121,6 +127,7 @@ def read_split(folder, tag, *, audit=None):
     for entry in archives:
         class_counts.update(entry["accepted_by_class"])
     summary.update({"archive_count": len(archives), "archives": archives,
+                    "malformed_record_policy": "reject" if reject_malformed_records else "count_and_skip",
                     "accepted_by_class": dict(class_counts),
                     "skipped_json": {reason: sum(entry["skipped_json"][reason] for entry in archives)
                                      for reason in INGEST_SKIP_REASONS}})
@@ -190,6 +197,9 @@ def main(argv=None):
                         help="new directory for this build; existing paths and symlinks are rejected")
     parser.add_argument("--max-gap-seconds", type=float,
                         help="exclude windows crossing larger observation gaps; unset disables gap filtering")
+    parser.add_argument("--reject-malformed-records", action="store_true",
+                        help="abort on UTF-8, JSON syntax or known record parsing failures; "
+                             "label filters and numeric defaults are unchanged")
     args = parser.parse_args(argv)
     try:
         _gap_threshold(args.max_gap_seconds)
@@ -200,9 +210,11 @@ def main(argv=None):
         parser.error(f"--out-dir must be a new directory, not an existing path or symlink: {OUT}")
     train_ingestion, validation_ingestion = {}, {}
     print("== Training 추출 ==", flush=True)
-    tr_dev, dt1, ms1 = read_split(os.path.join(BASE, "Training", "02.라벨링데이터"), "train", audit=train_ingestion)
+    tr_dev, dt1, ms1 = read_split(os.path.join(BASE, "Training", "02.라벨링데이터"), "train", audit=train_ingestion,
+                                 reject_malformed_records=args.reject_malformed_records)
     print("== Validation 추출 ==", flush=True)
-    va_dev, dt2, ms2 = read_split(os.path.join(BASE, "Validation", "02.라벨링데이터"), "val", audit=validation_ingestion)
+    va_dev, dt2, ms2 = read_split(os.path.join(BASE, "Validation", "02.라벨링데이터"), "val", audit=validation_ingestion,
+                                 reject_malformed_records=args.reject_malformed_records)
     overlap = set(tr_dev) & set(va_dev)
     if overlap:
         raise ValueError(f"official asset overlap: {sorted(map(str, overlap))[:5]}")

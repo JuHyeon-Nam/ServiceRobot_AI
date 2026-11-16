@@ -224,3 +224,99 @@ def test_all_excluded_records_produce_honest_zero_counts_not_normal_samples(tmp_
     assert audit["accepted_by_class"] == {}
     assert sum(audit["skipped_json"].values()) == 2
     assert_accounting(audit)
+
+
+@pytest.mark.parametrize("payload,reason", [(b"\xff", "invalid_utf8"), (b"{", "invalid_json"),
+                                            ([], "record_parse_error")])
+def test_reject_mode_stops_at_first_malformed_member_with_source_context(tmp_path, monkeypatch, payload, reason):
+    path = tmp_path / "records.zip"
+    write_zip(path, [("accepted.json", record()), ("nested/broken.json", payload),
+                     ("must-not-read.json", record(index=1))])
+    before = path.read_bytes()
+    original_read = builder.zipfile.ZipFile.read
+    read_names, audit = [], {"prior_result": "unchanged"}
+
+    def track_reads(archive, member, *args, **kwargs):
+        read_names.append(member.filename)
+        return original_read(archive, member, *args, **kwargs)
+
+    monkeypatch.setattr(builder.zipfile.ZipFile, "read", track_reads)
+    with pytest.raises(ValueError, match=reason) as error:
+        builder.read_split(tmp_path, "train", audit=audit, reject_malformed_records=True)
+    assert f"{path}::nested/broken.json" in str(error.value)
+    assert error.value.__cause__ is not None
+    assert read_names == ["accepted.json", "nested/broken.json"]
+    assert audit == {"prior_result": "unchanged"}
+    assert path.read_bytes() == before
+
+
+def test_reject_mode_retains_intentional_label_filters_and_numeric_fallbacks(tmp_path):
+    accepted = record()
+    accepted["deviceData"]["batteryLevel"] = "not-a-number"
+    write_zip(tmp_path / "records.zip", [("accepted.json", accepted),
+                                         ("missing-label.json", record(code=None)),
+                                         ("unassigned.json", record(code="NOT_ASSIGNED")),
+                                         ("notes.txt", b"not JSON")])
+    audit = {}
+    records, _, _ = builder.read_split(tmp_path, "train", audit=audit, reject_malformed_records=True)
+    assert records["robot-a"][0]["batteryLevel"] == 0.0
+    assert audit["malformed_record_policy"] == "reject"
+    assert audit["accepted_records"] == 1
+    assert audit["skipped_json"]["missing_error_code"] == 1
+    assert audit["skipped_json"]["not_assigned_error_code"] == 1
+    assert sum(audit["skipped_json"][key] for key in ("invalid_utf8", "invalid_json", "record_parse_error")) == 0
+    assert_accounting(audit)
+
+
+@pytest.mark.parametrize("split", ["Training", "Validation"])
+@pytest.mark.parametrize("payload,reason", [(b"\xff", "invalid_utf8"), (b"{", "invalid_json"),
+                                            ([], "record_parse_error")])
+def test_build_rejects_malformed_records_in_either_split_before_emitting_files(tmp_path, capsys, split, payload, reason):
+    source = tmp_path / "source"
+    before = {}
+    for current, asset in (("Training", "train-a"), ("Validation", "val-a")):
+        folder = source / current / "02.라벨링데이터"
+        folder.mkdir(parents=True)
+        path = folder / "records.zip"
+        entries = [(f"{i}.json", record(asset, i)) for i in range(35)]
+        if current == split:
+            entries.append(("broken.json", payload))
+        write_zip(path, entries)
+        before[path] = path.read_bytes()
+    output = tmp_path / "rejected"
+    with pytest.raises(ValueError, match=reason) as error:
+        builder.main(["--base-dir", str(source), "--out-dir", str(output), "--reject-malformed-records"])
+    assert split in str(error.value) and "records.zip::broken.json" in str(error.value)
+    assert not output.exists()
+    assert "저장 완료" not in capsys.readouterr().out
+    assert {path: path.read_bytes() for path in before} == before
+
+
+def test_reject_and_default_modes_build_identical_windows_on_accepted_inputs(tmp_path):
+    source, before = tmp_path / "source", {}
+    for split, asset in (("Training", "train-a"), ("Validation", "val-a")):
+        folder = source / split / "02.라벨링데이터"
+        folder.mkdir(parents=True)
+        path = folder / "records.zip"
+        entries = [(f"{i}.json", record(asset, i, "E-RBT-B" if i % 2 else "정상")) for i in reversed(range(35))]
+        entries += [("missing-label.json", record(code=None)), ("unassigned.json", record(code="NOT_ASSIGNED"))]
+        write_zip(path, entries)
+        before[path] = path.read_bytes()
+    default, strict = tmp_path / "default", tmp_path / "reject"
+    for output, options in ((default, []), (strict, ["--reject-malformed-records"])):
+        builder.main(["--base-dir", str(source), "--out-dir", str(output), *options])
+    for filename in ("enhanced_train.npz", "enhanced_val.npz"):
+        with np.load(default / filename, allow_pickle=False) as first, np.load(strict / filename, allow_pickle=False) as second:
+            assert set(first.files) == set(second.files) == {"X", "S", "y", "groups", "target_times"}
+            for key in first.files:
+                np.testing.assert_array_equal(first[key], second[key])
+        assert load_dataset(strict / filename)["features"].shape == (5, 249)
+    first = json.loads((default / "enhanced_meta.json").read_text())
+    second = json.loads((strict / "enhanced_meta.json").read_text())
+    for split in ("train", "validation"):
+        assert first["ingestion_audit"]["splits"][split].pop("malformed_record_policy") == "count_and_skip"
+        assert second["ingestion_audit"]["splits"][split].pop("malformed_record_policy") == "reject"
+    assert first == second
+    pd.testing.assert_frame_equal(pd.read_parquet(default / "replay_display.parquet"),
+                                  pd.read_parquet(strict / "replay_display.parquet"))
+    assert {path: path.read_bytes() for path in before} == before
