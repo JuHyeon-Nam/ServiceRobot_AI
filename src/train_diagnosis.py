@@ -16,14 +16,14 @@ import pandas as pd
 import sklearn
 
 from diagnosis_evaluation import (asset_error_analysis, asset_holdout, class_weights, classification_metrics, macro_f1_eval,
-                                  promotion_gate, select_candidate)
+                                  make_constrained_macro_f1_eval, promotion_gate, select_candidate)
 from pdm_runtime import FEATURE_BATCH_ROWS, MODEL_DYN_IDX, load_booster, make_feature_matrix_batched
 
 ROOT = Path(__file__).resolve().parents[1]
 NORMAL_RATIOS = (None, 2, 3, 5)
 WEIGHT_MODES = ("unweighted", "sqrt_balanced", "balanced")
 DATA_KINDS = ("unspecified", "aihub_recorded", "synthetic_fixture")
-ITERATION_METRICS = ("macro_f1", "multi_logloss")
+ITERATION_METRICS = ("macro_f1", "multi_logloss", "constrained_macro_f1")
 EARLY_STOPPING_ROUNDS = 40
 
 
@@ -227,11 +227,20 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                "champion_sha256": file_sha256(champion_dir / "robot_pdm_enhanced.txt")}
     environment = {"python": platform.python_version(), "numpy": np.__version__, "pandas": pd.__version__,
                    "lightgbm": lgb.__version__, "scikit_learn": sklearn.__version__}
-    iteration_selection = {"metric": iteration_metric, "higher_is_better": iteration_metric == "macro_f1",
+    iteration_selection = {"metric": iteration_metric, "higher_is_better": iteration_metric != "multi_logloss",
                            "dataset": "training_robot_holdout", "sample_weighted": False,
                            "patience": EARLY_STOPPING_ROUNDS, "default_metric_disabled": True,
-                           "builtin_metrics_disabled": iteration_metric == "macro_f1",
+                           "builtin_metrics_disabled": iteration_metric != "multi_logloss",
                            "training_objective": "multiclass"}
+    eval_metric = macro_f1_eval if iteration_metric == "macro_f1" else "multi_logloss"
+    if iteration_metric == "constrained_macro_f1":
+        eval_metric = make_constrained_macro_f1_eval(normal, max_false_alarm)
+        iteration_selection.update({
+            "normal_class_index": normal, "max_normal_false_alarm": float(max_false_alarm),
+            "constraint_comparison": "exact_normal_confusion_counts", "first_metric_only": True,
+            "score_encoding": "macro_f1_if_feasible_else_macro_f1_minus_2",
+            "auxiliary_metrics": ["macro_f1", "normal_false_alarm_rate"],
+            "no_feasible_iteration": "analysis_only_candidate_constraint_still_enforced"})
     feature_construction = {"mode": "batched", "max_batch_rows": FEATURE_BATCH_ROWS,
                             "dtype": "float32", "n_features": 249, "raw_sensor_arrays_retained": False}
     model_retention = {"strategy": "selection_leader_only", "max_completed_models_between_candidates": 1,
@@ -261,7 +270,7 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                           sample_weight=class_weights(train["y"][indices], mode),
                           eval_set=[(train_features.iloc[selection], train["y"][selection])],
                           eval_names=["robot_holdout"],
-                          eval_metric=macro_f1_eval if iteration_metric == "macro_f1" else "multi_logloss",
+                          eval_metric=eval_metric,
                           callbacks=[lgb.record_evaluation(history),
                                      lgb.early_stopping(EARLY_STOPPING_ROUNDS, first_metric_only=True, verbose=False)])
                 metrics = classification_metrics(train["y"][selection],
@@ -275,6 +284,9 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                    "iteration_history": {"dataset": "training_robot_holdout", "metric": iteration_metric,
                                          "values": history["robot_holdout"][iteration_metric]},
                    "elapsed_sec": round(time.perf_counter() - started, 4)}
+            if iteration_metric == "constrained_macro_f1":
+                row["iteration_history"]["auxiliary_values"] = {
+                    name: history["robot_holdout"][name] for name in iteration_selection["auxiliary_metrics"]}
             record_event(output, "candidate_completed", **row)
             experiments.append(row)
             try:
@@ -376,7 +388,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-kind", choices=DATA_KINDS, default="unspecified",
                         help="declared data source, not an independently verified provenance claim")
     parser.add_argument("--iteration-metric", choices=ITERATION_METRICS, default="macro_f1",
-                        help="robot-holdout early stopping metric; not the tree training objective")
+                        help="robot-holdout early stopping metric; constrained_macro_f1 prioritizes the "
+                             "--max-false-alarm limit, not a different tree training objective")
     parser.add_argument("--preflight-only", action="store_true", help="audit inputs and robot coverage without training")
     parser.add_argument("--preflight-report", type=Path, help="save the preflight JSON to a new file; never overwrite")
     args = parser.parse_args(argv)

@@ -78,7 +78,8 @@ def test_search_protects_serving_directory_and_its_children(tmp_path):
             train_candidates(tmp_path / "missing", destination, serving)
 
 
-def test_cli_maps_zero_to_full_data_and_forwards_grid(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("criterion", ["multi_logloss", "constrained_macro_f1"])
+def test_cli_maps_zero_to_full_data_and_forwards_grid(tmp_path, monkeypatch, capsys, criterion):
     import train_diagnosis
     received = {}
 
@@ -90,9 +91,9 @@ def test_cli_maps_zero_to_full_data_and_forwards_grid(tmp_path, monkeypatch, cap
     monkeypatch.setattr(train_diagnosis, "train_candidates", fake_train)
     assert main(["--output", str(tmp_path), "--normal-ratios", "0", "2", "5",
                  "--weight-modes", "unweighted", "balanced", "--data-kind", "synthetic_fixture",
-                 "--iteration-metric", "multi_logloss"]) == 0
+                 "--iteration-metric", criterion]) == 0
     assert received == {"ratios": (None, 2, 5), "modes": ("unweighted", "balanced"),
-                        "kind": "synthetic_fixture", "criterion": "multi_logloss"}
+                        "kind": "synthetic_fixture", "criterion": criterion}
     assert json.loads(capsys.readouterr().out)["data_kind"] == "synthetic_fixture"
 
 

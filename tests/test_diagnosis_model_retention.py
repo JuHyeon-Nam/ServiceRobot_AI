@@ -36,12 +36,26 @@ def candidate_data(tmp_path):
     return data
 
 
-def test_native_search_releases_losers_and_saves_the_exact_selected_model(candidate_data, tmp_path, monkeypatch):
+@pytest.mark.parametrize("iteration_metric", ["macro_f1", "constrained_macro_f1"])
+def test_native_search_releases_losers_and_saves_the_exact_selected_model(
+        candidate_data, tmp_path, monkeypatch, iteration_metric):
     before = (SERVING / "robot_pdm_enhanced.txt").read_bytes()
     original_classifier = train_diagnosis.lgb.LGBMClassifier
     original_event = train_diagnosis.record_event
     original_analysis = train_diagnosis.asset_error_analysis
+    original_factory = train_diagnosis.make_constrained_macro_f1_eval
     refs, live_before_creation, model_texts, analysis_calls = [], [], {}, []
+    iteration_calls, iteration_config = [], []
+
+    def tracked_factory(normal, limit):
+        iteration_config.append((normal, limit))
+        evaluate = original_factory(normal, limit)
+
+        def tracked_iteration(labels, probabilities):
+            iteration_calls.append(len(labels))
+            return evaluate(labels, probabilities)
+
+        return tracked_iteration
 
     def tracked_classifier(*args, **kwargs):
         gc.collect()
@@ -55,6 +69,7 @@ def test_native_search_releases_losers_and_saves_the_exact_selected_model(candid
         if event == "candidate_completed":
             current = refs[-1]()
             assert current is not None
+            assert current.booster_.params["objective"] == "multiclass"
             model_texts[fields["candidate_id"]] = current.booster_.model_to_string(
                 num_iteration=fields["best_iteration"])
         original_event(output, event, **fields)
@@ -71,9 +86,10 @@ def test_native_search_releases_losers_and_saves_the_exact_selected_model(candid
     monkeypatch.setattr(train_diagnosis.lgb, "LGBMClassifier", tracked_classifier)
     monkeypatch.setattr(train_diagnosis, "record_event", tracked_event)
     monkeypatch.setattr(train_diagnosis, "asset_error_analysis", tracked_analysis)
+    monkeypatch.setattr(train_diagnosis, "make_constrained_macro_f1_eval", tracked_factory)
     output = tmp_path / "candidate"
     report = train_diagnosis.train_candidates(candidate_data, output, SERVING, rounds=2,
-                                               data_kind="synthetic_fixture")
+                                               data_kind="synthetic_fixture", iteration_metric=iteration_metric)
     gc.collect()
     assert live_before_creation == [0] + [1] * 11
     assert len(refs) == len(report["experiments"]) == len(model_texts) == 12
@@ -86,6 +102,32 @@ def test_native_search_releases_losers_and_saves_the_exact_selected_model(candid
         for metric in ("rows", "accuracy", "normal_false_alarm_rate", "fault_miss_rate", "confusion_matrix"):
             assert errors["overall"][metric] == report[key][metric]
     assert all("asset_error_analysis" not in row["selection_metrics"] for row in report["experiments"])
+    if iteration_metric == "constrained_macro_f1":
+        protocol = report["iteration_selection"]
+        assert protocol["metric"] == iteration_metric
+        assert protocol["higher_is_better"] and protocol["builtin_metrics_disabled"]
+        assert protocol["first_metric_only"] and not protocol["sample_weighted"]
+        assert protocol["score_encoding"] == "macro_f1_if_feasible_else_macro_f1_minus_2"
+        normal = report["candidate"]["class_order"].index("정상")
+        assert iteration_config == [(normal, .05)]
+        selection_rows = sum(row["rows"] for row in report["dataset_support"]["selection"].values())
+        assert iteration_calls and set(iteration_calls) == {selection_rows}
+        for row in report["experiments"]:
+            history, best = row["iteration_history"], row["best_iteration"] - 1
+            assert history["metric"] == iteration_metric
+            assert history["values"][best] == max(history["values"])
+            auxiliary = history["auxiliary_values"]
+            assert set(auxiliary) == {"macro_f1", "normal_false_alarm_rate"}
+            assert len(auxiliary["macro_f1"]) == len(auxiliary["normal_false_alarm_rate"]) == len(history["values"])
+            for name in auxiliary:
+                assert auxiliary[name][best] == pytest.approx(row["selection_metrics"][name], abs=1e-6)
+            for score, raw_f1 in zip(history["values"], auxiliary["macro_f1"]):
+                assert score == pytest.approx(raw_f1 if score >= 0 else raw_f1 - 2)
+        saved_meta = json.loads((output / "robot_pdm_enhanced_meta.json").read_text())
+        assert saved_meta["iteration_selection_metric"] == iteration_metric
+        assert saved_meta["val_macro_f1"] == report["candidate"]["macro_f1"]
+    else:
+        assert not iteration_calls and not iteration_config
     assert all(ref() is None for ref in refs)
     assert all("model" not in row for row in report["experiments"])
     assert (output / "robot_pdm_enhanced.txt").read_text() == model_texts[report["selected_candidate"]]
@@ -97,9 +139,11 @@ def test_native_search_releases_losers_and_saves_the_exact_selected_model(candid
     assert report["candidate_model_retention"] == retention
     events = [json.loads(line) for line in (output / "training_events.jsonl").read_text().splitlines()]
     assert events[0]["candidate_model_retention"] == retention
+    assert events[0]["iteration_selection"] == report["iteration_selection"]
     assert sum(row["event"] == "candidate_completed" for row in events) == 12
     assert sum(row["event"] == "candidate_selected" for row in events) == 1
     assert len(pd.read_csv(output / "selection_results.csv")) == 12
+    assert set(pd.read_csv(output / "selection_results.csv")["iteration_metric"]) == {iteration_metric}
     assert json.loads((output / "experiment_report.json").read_text())["experiments"] == report["experiments"]
     assert not report["official_validation_used_for_selection"]
     assert not report["promotion"]["automatic_promotion"]

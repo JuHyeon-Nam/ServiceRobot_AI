@@ -11,7 +11,7 @@ from sklearn.metrics import f1_score
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from diagnosis_evaluation import macro_f1_eval
+from diagnosis_evaluation import macro_f1_eval, make_constrained_macro_f1_eval
 
 
 def test_metric_matches_unweighted_macro_f1_and_maximizes():
@@ -46,7 +46,8 @@ def test_metric_rejects_invalid_labels_or_predictions(labels, predictions):
         macro_f1_eval(labels, predictions)
 
 
-def test_real_lightgbm_stops_on_f1_plateau_without_builtin_logloss():
+@pytest.mark.parametrize("metric", ["macro_f1", "constrained_macro_f1"])
+def test_real_lightgbm_stops_on_f1_plateau_without_builtin_logloss(metric):
     labels = np.repeat(np.arange(3), 40)
     features = pd.DataFrame({"signal": labels.astype(float), "offset": np.tile(np.arange(40), 3)})
     held_labels = np.repeat(np.arange(3), 20)
@@ -57,11 +58,15 @@ def test_real_lightgbm_stops_on_f1_plateau_without_builtin_logloss():
                                verbosity=-1, deterministic=True, force_col_wise=True)
     history = {}
     model.fit(features, labels, eval_set=[(held_features, held_labels)], eval_names=["robot_holdout"],
-              eval_metric=macro_f1_eval,
+              eval_metric=macro_f1_eval if metric == "macro_f1" else make_constrained_macro_f1_eval(1),
               callbacks=[lgb.record_evaluation(history), lgb.early_stopping(3, first_metric_only=True, verbose=False)])
-    assert set(history["robot_holdout"]) == {"macro_f1"}
+    expected = {"macro_f1"} if metric == "macro_f1" else {"constrained_macro_f1", "macro_f1", "normal_false_alarm_rate"}
+    assert set(history["robot_holdout"]) == expected
     scores = history["robot_holdout"]["macro_f1"]
     assert scores == [1.0] * 4
     assert model.best_iteration_ == 1
     assert model.best_score_["robot_holdout"]["macro_f1"] == 1.0
+    assert history["robot_holdout"][metric] == [1.0] * 4
+    if metric == "constrained_macro_f1":
+        assert history["robot_holdout"]["normal_false_alarm_rate"] == [0.] * 4
     assert model.booster_.params["objective"] == "multiclass"

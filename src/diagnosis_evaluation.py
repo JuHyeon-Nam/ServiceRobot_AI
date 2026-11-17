@@ -25,6 +25,33 @@ def macro_f1_eval(y_true: np.ndarray, probabilities: np.ndarray) -> tuple[str, f
     return "macro_f1", float(score), True
 
 
+def make_constrained_macro_f1_eval(normal_class: int, max_false_alarm: float = 0.05):
+    """Prefer feasible rounds, then Macro-F1; expose raw metrics beside the selection score."""
+    if not isinstance(normal_class, Integral) or isinstance(normal_class, bool) or normal_class < 0:
+        raise ValueError("normal class must be a nonnegative integer index")
+    if not _unit_interval(max_false_alarm):
+        raise ValueError("iteration false-alarm limit must be a finite number between zero and one")
+    limit = Fraction(str(float(max_false_alarm)))
+
+    def evaluate(y_true, probabilities):
+        _, macro_f1, _ = macro_f1_eval(y_true, probabilities)
+        y, probabilities = np.asarray(y_true, dtype=float), np.asarray(probabilities, dtype=float)
+        if normal_class >= probabilities.shape[1]:
+            raise ValueError("normal class is outside the prediction class order")
+        normal_mask = y == normal_class
+        normal_rows = int(normal_mask.sum())
+        if not normal_rows:
+            raise ValueError("constrained iteration selection requires actual normal holdout rows")
+        false_alarms = int(np.count_nonzero(probabilities.argmax(axis=1)[normal_mask] != normal_class))
+        false_alarm_rate = Fraction(false_alarms, normal_rows)
+        # Feasible scores are [0, 1]; infeasible scores are [-2, -1]. This is not a probability.
+        selection_score = macro_f1 if false_alarm_rate <= limit else macro_f1 - 2.0
+        return [("constrained_macro_f1", selection_score, True), ("macro_f1", macro_f1, True),
+                ("normal_false_alarm_rate", float(false_alarm_rate), False)]
+
+    return evaluate
+
+
 def classification_metrics(y: np.ndarray, probabilities: np.ndarray, names: list[str]) -> dict:
     y, probabilities = np.asarray(y, dtype=int), np.asarray(probabilities, dtype=float)
     if probabilities.shape != (len(y), len(names)) or not len(y):
