@@ -64,6 +64,7 @@ def test_support_counts_windows_and_independent_assets_separately():
     {"weight_modes": ("balanced", "balanced")}, {"data_kind": "physical_robot"},
     {"iteration_metric": "accuracy"},
     {"rounds": 0}, {"max_false_alarm": float("nan")},
+    {"selection_only": None}, {"selection_only": 1}, {"selection_only": "False"},
 ])
 def test_search_rejects_invalid_config_before_loading_data(tmp_path, config):
     with pytest.raises(ValueError):
@@ -79,22 +80,45 @@ def test_search_protects_serving_directory_and_its_children(tmp_path):
 
 
 @pytest.mark.parametrize("criterion", ["multi_logloss", "constrained_macro_f1"])
-def test_cli_maps_zero_to_full_data_and_forwards_grid(tmp_path, monkeypatch, capsys, criterion):
+@pytest.mark.parametrize("selection_only", [False, True])
+def test_cli_maps_zero_to_full_data_and_forwards_grid(tmp_path, monkeypatch, capsys, criterion, selection_only):
     import train_diagnosis
     received = {}
 
     def fake_train(*args):
         received["ratios"], received["modes"], received["kind"] = args[6:9]
         received["criterion"] = args[9]
-        return {"selected_candidate": "test", "candidate": {}, "promotion": {"eligible": False}}
+        received["selection_only"] = args[10]
+        return {"selected_candidate": "test", "candidate": None if selection_only else {},
+                "promotion": {"eligible": False}, "evaluation_scope": "training_robot_holdout_only",
+                "selected_holdout_metrics": {"macro_f1": .5}}
 
     monkeypatch.setattr(train_diagnosis, "train_candidates", fake_train)
     assert main(["--output", str(tmp_path), "--normal-ratios", "0", "2", "5",
                  "--weight-modes", "unweighted", "balanced", "--data-kind", "synthetic_fixture",
-                 "--iteration-metric", criterion]) == 0
+                 "--iteration-metric", criterion, *(["--selection-only"] if selection_only else [])]) == 0
     assert received == {"ratios": (None, 2, 5), "modes": ("unweighted", "balanced"),
-                        "kind": "synthetic_fixture", "criterion": criterion}
-    assert json.loads(capsys.readouterr().out)["data_kind"] == "synthetic_fixture"
+                        "kind": "synthetic_fixture", "criterion": criterion, "selection_only": selection_only}
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["data_kind"] == "synthetic_fixture"
+    if selection_only:
+        assert summary["candidate"] is None
+        assert not summary["official_validation_evaluated"]
+        assert summary["selection"] == {"macro_f1": .5}
+
+
+def test_cli_rejects_conflicting_inspection_and_selection_modes_before_io(tmp_path, monkeypatch):
+    import train_diagnosis
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("conflicting modes must be rejected before any preflight or training")
+
+    monkeypatch.setattr(train_diagnosis, "audit_training_data", forbidden)
+    monkeypatch.setattr(train_diagnosis, "train_candidates", forbidden)
+    with pytest.raises(SystemExit) as error:
+        main(["--preflight-only", "--selection-only", "--output", str(tmp_path / "out")])
+    assert error.value.code == 2
+    assert not (tmp_path / "out").exists()
 
 
 def test_file_digest_uses_file_contents(tmp_path):

@@ -1,6 +1,42 @@
 # 모델·운영 고도화 계획
 
-최초 기준일: 2026-10-07. 최근 갱신: 2026-11-17. 기존 진단·3D·정비 시스템을 유지하면서 검증 가능한 학습형 PHM 근거와 운영 신뢰성 확장. 아래 미완료 항목은 완료 약속이 아닌 후속 작업 계획. 실제 진단 성능 개선에는 원본 데이터 확보와 재평가 필요.
+최초 기준일: 2026-10-07. 최근 갱신: 2026-11-18. 기존 진단·3D·정비 시스템을 유지하면서 검증 가능한 학습형 PHM 근거와 운영 신뢰성 확장. 아래 미완료 항목은 완료 약속이 아닌 후속 작업 계획. 실제 진단 성능 개선에는 원본 데이터 확보와 재평가 필요.
+
+## 공식 평가와 분리한 후보 선택 (2026-11-18)
+
+`train_diagnosis.py --selection-only` 추가. 내부 로봇 holdout에서 반복 기준·가중치·정상 표본 비율을 비교할 때 공식 Validation 결과를 열어보지 않도록 실행 경로 분리. **실제 모델 학습을 수행하는 모드**이며 학습하지 않는 `--preflight-only`와 다름. 기본 전체 비교 실행은 유지.
+
+AI-Hub 출처와 학습 입력 준비를 확인한 뒤 사용. 아래 두 명령은 서로 다른 실험 디렉터리 사용:
+
+```bash
+# 내부 비교. 다른 회차 기준도 공식 Validation을 보지 않고 별도 경로에서 실행.
+python src/train_diagnosis.py --data-dir data/datasets/robot-v4 \
+  --output data/experiments/selection-constrained-001 --selection-only \
+  --iteration-metric constrained_macro_f1 --data-kind aihub_recorded
+
+# 기준·상한·seed·검색 범위를 먼저 확정한 뒤 공식 비교. 선택 전용 모델을 자동 승격하지 않음.
+python src/train_diagnosis.py --data-dir data/datasets/robot-v4 \
+  --output data/experiments/final-constrained-001 \
+  --iteration-metric constrained_macro_f1 --data-kind aihub_recorded
+```
+
+| 항목 | 선택 전용 실행 |
+|---|---|
+| 학습·선택 | 기존 로봇 holdout·12개 후보·정확한 건수 기반 순위·선두 모델 보관 정책 유지. `macro_f1`·`multi_logloss`·`constrained_macro_f1` 모두 지원 |
+| 읽지 않는 입력 | `enhanced_val.npz` 로딩·특징 생성·해시 계산 생략. 비교할 기존 Booster `.txt`도 로딩·해시 계산하지 않음. 두 파일이 없어도 내부 선택 실행 가능 |
+| 계속 읽는 입력 | Training NPZ, 공유 `enhanced_meta.json`, 기존 모델의 인코딩·클래스/특징 명세 JSON. 기존 모델 명세와의 호환성 검사는 유지 |
+| 평가 범위 | 선택 전용 보고서 스키마 `servicerobot.diagnosis.selection.v1`. `selection_only=true`, `evaluation_scope=training_robot_holdout_only`, `official_validation_evaluated=false` 기록. CLI에서도 내부 점수를 `selection`으로 표시. 기본 공식 비교 스키마 `experiment.v2` 유지 |
+| 점수 구분 | `selected_holdout_metrics`에 선택 후보의 내부 점수 저장. 공식 비교용 `candidate`·`champion`은 `null`. 내부 Macro-F1을 공식 평가값으로 대입하지 않음 |
+| 미검사 항목 | 공식 Validation의 로봇 목록·표본 수와 `asset_overlap`은 `null`, `official_asset_overlap_checked=false`. 중복 미검사를 중복 0건으로 표시하지 않음 |
+| 저장 모델 | 기존 파일명으로 선택된 실험 모델·명세 저장. 모델 메타에 평가 범위를 표시하며 `val_acc`·`val_macro_f1`은 생략. 아직 공식 평가되지 않은 후보임을 구분 |
+| 승격 | 비교 지표와 `promotion_gate`를 호출하지 않음. `official_validation_not_evaluated` 사유로 검토 불가·자동 승격 비활성. 호출자의 `aihub_recorded` 선언만으로도 우회 불가 |
+| 기록·안전 | 시작 JSONL은 공식 평가 예정 여부, 완료 JSONL은 실제 평가 여부 기록. 기존 운영 경로 보호·입력 불변·결과 비덮어쓰기 정책 유지. `--preflight-only`와 동시 사용은 입력 접근 전 거부 |
+
+후속 전체 실행은 동일한 확정 설정으로 후보를 **다시 학습·선택한 뒤** 기존처럼 공식 분할 로봇 중복·클래스 완전성 검사를 통과한 입력에서 선택 후보와 기존 모델을 평가. 선택 전용 파일을 자동으로 공식 평가 결과로 바꾸거나 운영 경로에 복사하지 않음. 저장 후보는 별도 `evaluate_enhanced.py`로도 읽을 수 있지만, 단독 평가의 학습/Validation 로봇 중복 미검사 등 기존 한계는 유지. 별도 평가를 수행해도 원래 선택 전용 실험 기록과 모델 명세를 자동 수정하지 않음.
+
+**완전한 데이터 블라인드·누출 방지의 증명은 아님.** 공유 메타에 Validation에서 유래한 인코딩·집계 정보가 포함될 수 있고 Training NPZ가 올바르게 만들어졌는지도 이 모드만으로 보장하지 못함. 기존 모델 명세 JSON에 과거 Validation 점수가 담겨 있을 수도 있으나 실행에서는 클래스/특징 계약 검사에만 사용. 전처리·인코딩 확정 과정도 별도로 관리해야 함. 단일 내부 holdout에 대한 반복 튜닝의 과적합, 사용자에 의한 여러 공식 실행 후 최고값 선택, 원본 출처 진위도 자동 방지하지 않음. 학습 내부 CV 기반 회차 기준 자동 비교·확정 설정 잠금은 미구현. Validation 파일이 없다고 실제 재학습에 Training 데이터까지 불필요한 것은 아님.
+
+2026-11-18 검증: 합성/통합 테스트 12개 추가, 관련 74개·전체 660개 통과. 세 회차 기준의 실제 LightGBM 12개 후보 검색에서 Training만 로딩·선택 holdout만 예측하고 공식 입력 해시·Booster 비교·로봇별 Validation 분석·승격 검토를 호출하지 않는지 검사. Validation/비교 모델의 부재·잘못된 파일에서도 선택 완료, `null`/평가 범위/누락 메타 점수/출력 기록 정합성 확인. 동일 합성 환경의 후속 전체 실행에서 선택 후보·내부 점수·모델 바이트 일치 및 별도 저장 모델 평가 호환·입력/기록 불변성 검증. 이 합성 데이터는 일반화 성능의 평가 근거가 아님. 현재 AI-Hub ZIP/NPZ 부재로 실제 재학습·성능 재평가 미수행. Accuracy 0.9329 / Macro-F1 0.5838 및 운영 모델·UI 유지.
 
 ## 오탐 제약을 고려한 회차 선택 (2026-11-17)
 

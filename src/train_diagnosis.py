@@ -1,4 +1,4 @@
-"""Select diagnosis candidates on robot holdout; evaluate once on official validation."""
+"""Select diagnosis candidates on robot holdout with optional official Validation comparison."""
 from __future__ import annotations
 
 import argparse
@@ -188,7 +188,7 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                      seed: int = 42, rounds: int = 800, max_false_alarm: float = 0.05,
                      normal_ratios: tuple[int | None, ...] = NORMAL_RATIOS,
                      weight_modes: tuple[str, ...] = WEIGHT_MODES, data_kind: str = "unspecified",
-                     iteration_metric: str = "macro_f1") -> dict:
+                     iteration_metric: str = "macro_f1", selection_only: bool = False) -> dict:
     destination, serving = output.resolve(), champion_dir.resolve()
     if destination == serving or destination in serving.parents or serving in destination.parents:
         raise ValueError("candidate output must not overwrite the serving model directory")
@@ -198,6 +198,8 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
         raise ValueError("invalid rounds, false-alarm limit, or data kind")
     if iteration_metric not in ITERATION_METRICS:
         raise ValueError("unsupported iteration selection metric")
+    if not isinstance(selection_only, bool):
+        raise ValueError("selection_only must be boolean")
     if (not normal_ratios or len(set(normal_ratios)) != len(normal_ratios)
             or any(r is not None and (isinstance(r, bool) or not isinstance(r, int) or r < 1) for r in normal_ratios)):
         raise ValueError("normal ratios must be unique positive integers or None")
@@ -205,26 +207,32 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
             or any(m not in WEIGHT_MODES for m in weight_modes)):
         raise ValueError("weight modes must be unique supported values")
     train = load_dataset(data_dir / "enhanced_train.npz", keep_raw=False)
-    validation = load_dataset(data_dir / "enhanced_val.npz", keep_raw=False)
-    overlap = sorted(set(train["groups"]) & set(validation["groups"]))
-    if overlap:
-        raise ValueError(f"official train/validation asset overlap: {overlap[:5]}")
+    validation = None
+    if not selection_only:
+        validation = load_dataset(data_dir / "enhanced_val.npz", keep_raw=False)
+        overlap = sorted(set(train["groups"]) & set(validation["groups"]))
+        if overlap:
+            raise ValueError(f"official train/validation asset overlap: {overlap[:5]}")
     metadata = json.loads((data_dir / "enhanced_meta.json").read_text(encoding="utf-8"))
     champion_dataset_meta = json.loads((champion_dir / "enhanced_meta.json").read_text(encoding="utf-8"))
     champion_meta = json.loads((champion_dir / "robot_pdm_enhanced_meta.json").read_text(encoding="utf-8"))
     names = validate_metadata_contract(metadata, champion_dataset_meta, champion_meta)
     validate_label_coverage(train["y"], names, "training")
-    validate_label_coverage(validation["y"], names, "validation")
+    if validation is not None:
+        validate_label_coverage(validation["y"], names, "validation")
     normal = names.index("정상")
     fit, selection = asset_holdout(train["y"], train["groups"], seed, require_all_classes=True)
     train_features = pd.DataFrame(train["features"])
-    validation_features = pd.DataFrame(validation["features"])
+    validation_features = pd.DataFrame(validation["features"]) if validation is not None else None
+    lineage_files = (("enhanced_train.npz", "enhanced_meta.json") if selection_only else
+                     ("enhanced_train.npz", "enhanced_val.npz", "enhanced_meta.json"))
     lineage = {"data_kind": data_kind, "data_kind_source": "caller_declared_not_independently_verified",
                "sha256": {name: file_sha256(data_dir / name)
-                          for name in ("enhanced_train.npz", "enhanced_val.npz", "enhanced_meta.json")},
+                          for name in lineage_files},
                "code_sha256": {name: file_sha256(ROOT / "src" / name)
                                for name in ("train_diagnosis.py", "diagnosis_evaluation.py", "pdm_runtime.py")},
-               "champion_sha256": file_sha256(champion_dir / "robot_pdm_enhanced.txt")}
+               "champion_sha256": None if selection_only else file_sha256(champion_dir / "robot_pdm_enhanced.txt")}
+    evaluation_scope = "training_robot_holdout_only" if selection_only else "official_validation_comparison"
     environment = {"python": platform.python_version(), "numpy": np.__version__, "pandas": pd.__version__,
                    "lightgbm": lgb.__version__, "scikit_learn": sklearn.__version__}
     iteration_selection = {"metric": iteration_metric, "higher_is_better": iteration_metric != "multi_logloss",
@@ -247,6 +255,8 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                        "all_candidate_metrics_retained": True}
     output.mkdir(parents=True, exist_ok=True)
     record_event(output, "run_started", seed=seed, rounds=rounds, lineage=lineage,
+                 selection_only=selection_only, evaluation_scope=evaluation_scope,
+                 official_validation_planned=not selection_only,
                  normal_ratios=list(normal_ratios), weight_modes=list(weight_modes), environment=environment,
                  iteration_selection=iteration_selection, max_false_alarm=max_false_alarm,
                  feature_construction=feature_construction, candidate_model_retention=model_retention)
@@ -308,18 +318,22 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
     winner = next(row for row in experiments if row["candidate_id"] == selection_decision["selected_candidate"])
     record_event(output, "candidate_selected", **selection_decision)
     model = retained_model
-    probabilities = model.predict_proba(validation_features)
-    candidate_metrics = classification_metrics(validation["y"], probabilities, names)
-    candidate_metrics["asset_error_analysis"] = asset_error_analysis(
-        validation["y"], probabilities.argmax(axis=1), validation["groups"], names)
-    del probabilities
-    champion = load_booster(champion_dir / "robot_pdm_enhanced.txt")
-    probabilities = champion.predict(validation["features"])
-    champion_metrics = classification_metrics(validation["y"], probabilities, names)
-    champion_metrics["asset_error_analysis"] = asset_error_analysis(
-        validation["y"], probabilities.argmax(axis=1), validation["groups"], names)
-    del probabilities
-    promotion = promotion_gate(champion_metrics, candidate_metrics, max_false_alarm)
+    candidate_metrics = champion_metrics = None
+    if selection_only:
+        promotion = {"eligible": False, "reasons": ["official_validation_not_evaluated"], "automatic_promotion": False}
+    else:
+        probabilities = model.predict_proba(validation_features)
+        candidate_metrics = classification_metrics(validation["y"], probabilities, names)
+        candidate_metrics["asset_error_analysis"] = asset_error_analysis(
+            validation["y"], probabilities.argmax(axis=1), validation["groups"], names)
+        del probabilities
+        champion = load_booster(champion_dir / "robot_pdm_enhanced.txt")
+        probabilities = champion.predict(validation["features"])
+        champion_metrics = classification_metrics(validation["y"], probabilities, names)
+        champion_metrics["asset_error_analysis"] = asset_error_analysis(
+            validation["y"], probabilities.argmax(axis=1), validation["groups"], names)
+        del probabilities
+        promotion = promotion_gate(champion_metrics, candidate_metrics, max_false_alarm)
     if not selection_decision["constraint_met"]:
         promotion["eligible"] = False
         promotion["reasons"].append("selection_false_alarm_limit")
@@ -327,7 +341,10 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
         promotion["eligible"] = False
         promotion["reasons"].append("data_provenance_not_recorded_aihub")
     report = {
-        "schema": "servicerobot.diagnosis.experiment.v2", "seed": seed,
+        "schema": "servicerobot.diagnosis.selection.v1" if selection_only else "servicerobot.diagnosis.experiment.v2",
+        "seed": seed,
+        "selection_only": selection_only, "evaluation_scope": evaluation_scope,
+        "official_validation_evaluated": not selection_only,
         "lineage": lineage, "environment": environment,
         "iteration_selection": iteration_selection,
         "feature_construction": feature_construction,
@@ -337,28 +354,34 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
         "selection_protocol": "robot_group_holdout", "official_validation_used_for_selection": False,
         "split_audit": {"fit_assets": sorted(set(train["groups"][fit])),
                         "selection_assets": sorted(set(train["groups"][selection])),
-                        "official_validation_assets": sorted(set(validation["groups"])), "asset_overlap": 0},
+                        "official_validation_assets": sorted(set(validation["groups"])) if validation is not None else None,
+                        "official_asset_overlap_checked": not selection_only,
+                        "asset_overlap": None if selection_only else 0},
         "dataset_support": {"official_train": dataset_support(train["y"], train["groups"], names),
                             "fit": dataset_support(train["y"][fit], train["groups"][fit], names),
                             "selection": dataset_support(train["y"][selection], train["groups"][selection], names),
-                            "official_validation": dataset_support(validation["y"], validation["groups"], names)},
+                            "official_validation": (dataset_support(validation["y"], validation["groups"], names)
+                                                    if validation is not None else None)},
         "experiments": experiments,
         "selected_mode": winner["mode"], "selected_candidate": winner["candidate_id"],
         "selected_normal_ratio": winner["normal_ratio"],
         "selection_constraint_met": selection_decision["constraint_met"], "selection_decision": selection_decision,
+        "selected_holdout_metrics": winner["selection_metrics"],
         "champion": champion_metrics, "candidate": candidate_metrics,
         "promotion": promotion,
         "probability_calibration": "not_fitted; weighted candidates require calibration before deployment",
     }
     model.booster_.save_model(str(output / "robot_pdm_enhanced.txt"))
     candidate_meta = {"classes": list(range(len(names))), "class_names": names,
-                      "n_features": 249, "val_acc": candidate_metrics["accuracy"],
-                      "val_macro_f1": candidate_metrics["macro_f1"], "best_iteration": winner["best_iteration"],
+                      "n_features": 249, "best_iteration": winner["best_iteration"],
                       "dyn": metadata["dyn"], "model_dyn_idx": MODEL_DYN_IDX,
                       "stat": metadata["stat"], "err_map": metadata["err_map"],
                       "selection_protocol": "robot_group_holdout", "automatic_promotion": False,
+                      "evaluation_scope": evaluation_scope, "official_validation_evaluated": not selection_only,
                       "iteration_selection_metric": iteration_metric,
                       "data_kind": data_kind, "candidate_id": winner["candidate_id"]}
+    if candidate_metrics is not None:
+        candidate_meta.update({"val_acc": candidate_metrics["accuracy"], "val_macro_f1": candidate_metrics["macro_f1"]})
     for name, value in (("robot_pdm_enhanced_meta.json", candidate_meta), ("enhanced_meta.json", metadata),
                         ("experiment_report.json", report)):
         (output / name).write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
@@ -370,7 +393,8 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                       ("accuracy", "macro_f1", "normal_false_alarm_rate", "fault_miss_rate")}}
                   for row in experiments]
     pd.DataFrame(comparison).to_csv(output / "selection_results.csv", index=False)
-    record_event(output, "run_completed", selected_candidate=winner["candidate_id"], promotion=promotion)
+    record_event(output, "run_completed", selected_candidate=winner["candidate_id"], promotion=promotion,
+                 official_validation_evaluated=not selection_only)
     return report
 
 
@@ -391,8 +415,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="robot-holdout early stopping metric; constrained_macro_f1 prioritizes the "
                              "--max-false-alarm limit, not a different tree training objective")
     parser.add_argument("--preflight-only", action="store_true", help="audit inputs and robot coverage without training")
+    parser.add_argument("--selection-only", action="store_true",
+                        help="train and select on training robot holdout only; do not open official Validation NPZ")
     parser.add_argument("--preflight-report", type=Path, help="save the preflight JSON to a new file; never overwrite")
     args = parser.parse_args(argv)
+    if args.selection_only and args.preflight_only:
+        parser.error("--selection-only cannot be combined with --preflight-only")
     if args.preflight_report is not None and not args.preflight_only:
         parser.error("--preflight-report requires --preflight-only")
     if args.preflight_only:
@@ -414,13 +442,16 @@ def main(argv: list[str] | None = None) -> int:
         report = train_candidates(args.data_dir, args.output, args.champion_dir,
                                   args.seed, args.rounds, args.max_false_alarm,
                                   tuple(None if r == 0 else r for r in args.normal_ratios),
-                                  tuple(args.weight_modes), args.data_kind, args.iteration_metric)
+                                  tuple(args.weight_modes), args.data_kind, args.iteration_metric, args.selection_only)
     except (FileNotFoundError, ValueError) as error:
         parser.exit(2, f"Diagnosis experiment: {error}\n")
-    print(json.dumps({"selected_candidate": report["selected_candidate"], "data_kind": args.data_kind,
-                      "candidate": report["candidate"],
-                      "promotion": report["promotion"], "elapsed_sec": round(time.perf_counter() - started, 2)},
-                     ensure_ascii=False, indent=2))
+    summary = {"selected_candidate": report["selected_candidate"], "data_kind": args.data_kind,
+               "candidate": report["candidate"], "promotion": report["promotion"],
+               "elapsed_sec": round(time.perf_counter() - started, 2)}
+    if args.selection_only:
+        summary.update({"evaluation_scope": report["evaluation_scope"], "official_validation_evaluated": False,
+                        "selection": report["selected_holdout_metrics"]})
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 
 
