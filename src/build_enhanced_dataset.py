@@ -9,6 +9,7 @@ build_enhanced_dataset.py
 출력: 새 --out-dir의 enhanced_{train,val}.npz (X, S, y, groups, target_times)
 """
 import argparse
+import hashlib
 from math import isfinite
 from numbers import Real
 import os, glob, zipfile, json
@@ -188,6 +189,31 @@ def prepare_sequence(records, device_id, max_gap_seconds=None):
     return records, np.cumsum(gaps), {"timestamp_basis": basis, "gaps": int(gaps.sum())}
 
 
+def load_encoding_metadata(path: Path):
+    """Freeze an explicit encoding contract; hash the exact bytes used for parsing."""
+    raw = path.read_bytes()
+    metadata = json.loads(raw)
+    if not isinstance(metadata, dict):
+        raise ValueError("encoding metadata must be a JSON object")
+    if metadata.get("dyn") != DYN or metadata.get("stat") != STAT_NUM + ["deviceType", "mainState"]:
+        raise ValueError("encoding metadata sensor/context order differs from the builder contract")
+    crowd = metadata.get("crowd_map")
+    if not isinstance(crowd, dict) or crowd != CROWD or any(type(value) is not int for value in crowd.values()):
+        raise ValueError("encoding metadata crowd map differs from the parser contract")
+    for name in ("err_map", "devtype_map", "mainstate_map"):
+        mapping = metadata.get(name)
+        if (not isinstance(mapping, dict) or not mapping
+                or any(not isinstance(key, str) or not key.strip() or key != key.strip() for key in mapping)
+                or any(type(value) is not int for value in mapping.values())
+                or sorted(mapping.values()) != list(range(len(mapping)))):
+            raise ValueError(f"encoding metadata {name} must use nonempty categories and contiguous integer indices")
+    if "정상" not in metadata["err_map"]:
+        raise ValueError("encoding metadata err_map must include normal")
+    return metadata, {"mode": "frozen_metadata", "source_path": str(path.resolve()),
+                      "source_sha256": hashlib.sha256(raw).hexdigest(),
+                      "unknown_category_policy": "reject_deviceType_mainState_errorCode"}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Build robot windows with asset identity audit.")
     parser.add_argument("--base-dir", required=True, type=Path,
@@ -200,6 +226,8 @@ def main(argv=None):
     parser.add_argument("--reject-malformed-records", action="store_true",
                         help="abort on UTF-8, JSON syntax or known record parsing failures; "
                              "label filters and numeric defaults are unchanged")
+    parser.add_argument("--encoding-meta", type=Path,
+                        help="reuse fixed maps from this metadata; reject unknown deviceType/mainState/errorCode")
     args = parser.parse_args(argv)
     try:
         _gap_threshold(args.max_gap_seconds)
@@ -208,6 +236,11 @@ def main(argv=None):
     BASE, OUT = str(args.base_dir), args.out_dir
     if OUT.exists() or OUT.is_symlink():
         parser.error(f"--out-dir must be a new directory, not an existing path or symlink: {OUT}")
+    encodings = None
+    encoding_audit = {"mode": "fit_on_official_split_union", "source_path": None, "source_sha256": None,
+                      "unknown_category_policy": "legacy_defaults"}
+    if args.encoding_meta is not None:
+        encodings, encoding_audit = load_encoding_metadata(args.encoding_meta)
     train_ingestion, validation_ingestion = {}, {}
     print("== Training 추출 ==", flush=True)
     tr_dev, dt1, ms1 = read_split(os.path.join(BASE, "Training", "02.라벨링데이터"), "train", audit=train_ingestion,
@@ -219,16 +252,26 @@ def main(argv=None):
     if overlap:
         raise ValueError(f"official asset overlap: {sorted(map(str, overlap))[:5]}")
 
-    # 인코더(두 split 공통)
-    devtype_map = {v: i for i, v in enumerate(sorted(dt1 | dt2))}
-    mainstate_map = {v: i for i, v in enumerate(sorted(s for s in (ms1 | ms2) if s))}
-    # 에러코드 인코딩(두 split 공통, 정렬 고정)
-    codes = set()
-    for dd in (tr_dev, va_dev):
-        for recs in dd.values():
-            for r in recs:
-                codes.add(r["errorCode"])
-    err_map = {v: i for i, v in enumerate(sorted(codes))}
+    if encodings is None:
+        # 인코더(두 split 공통, 기존 동작)
+        devtype_map = {v: i for i, v in enumerate(sorted(dt1 | dt2))}
+        mainstate_map = {v: i for i, v in enumerate(sorted(s for s in (ms1 | ms2) if s))}
+        codes = set()
+        for dd in (tr_dev, va_dev):
+            for recs in dd.values():
+                for r in recs:
+                    codes.add(r["errorCode"])
+        err_map = {v: i for i, v in enumerate(sorted(codes))}
+    else:
+        devtype_map, mainstate_map, err_map = [encodings[key] for key in ("devtype_map", "mainstate_map", "err_map")]
+        # Check every accepted observation, including short histories that emit no windows.
+        for tag, by_dev in (("train", tr_dev), ("validation", va_dev)):
+            for device, records in by_dev.items():
+                for record in records:
+                    for field, mapping in (("deviceType", devtype_map), ("mainState", mainstate_map), ("errorCode", err_map)):
+                        value = record[field]
+                        if not isinstance(value, str) or value not in mapping:
+                            raise ValueError(f"unknown {field} {value!r} in {tag} for {device}; frozen encoding")
     print("errorCode 매핑:", err_map, flush=True)
     print("deviceType:", devtype_map, "| mainState 수:", len(mainstate_map), flush=True)
 
@@ -301,6 +344,7 @@ def main(argv=None):
                    "mainstate_map": mainstate_map, "crowd_map": CROWD,
                    "dyn": DYN, "stat": STAT_NUM + ["deviceType", "mainState"],
                    "window_contract": {"history": "30 observations before target", "context": "at target time"},
+                   "encoding_audit": encoding_audit,
                    "ingestion_audit": {"schema": "servicerobot.dataset.ingestion.v1",
                                        "json_member_policy": "case_sensitive_.json_suffix; each_zip_entry",
                                        "splits": {"train": train_ingestion, "validation": validation_ingestion}},
