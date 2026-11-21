@@ -7,6 +7,7 @@ build_enhanced_dataset.py
 - 동적 센서 7개는 30시점 시퀀스로, 정적/누적/맥락 피처 9개는 윈도우 끝 값으로 부착
 
 출력: 새 --out-dir의 enhanced_{train,val}.npz (X, S, y, groups, target_times)
+--training-only: 고정 인코딩으로 Training만 생성. 공식 Validation/재생 파일은 읽거나 만들지 않음.
 """
 import argparse
 import hashlib
@@ -228,7 +229,12 @@ def main(argv=None):
                              "label filters and numeric defaults are unchanged")
     parser.add_argument("--encoding-meta", type=Path,
                         help="reuse fixed maps from this metadata; reject unknown deviceType/mainState/errorCode")
+    parser.add_argument("--training-only", action="store_true",
+                        help="build Training windows only for internal robot holdout; requires --encoding-meta; "
+                             "do not read official Validation or create validation/replay files")
     args = parser.parse_args(argv)
+    if args.training_only and args.encoding_meta is None:
+        parser.error("--training-only requires --encoding-meta to preserve the existing encoding contract")
     try:
         _gap_threshold(args.max_gap_seconds)
     except ValueError as error:
@@ -245,12 +251,16 @@ def main(argv=None):
     print("== Training 추출 ==", flush=True)
     tr_dev, dt1, ms1 = read_split(os.path.join(BASE, "Training", "02.라벨링데이터"), "train", audit=train_ingestion,
                                  reject_malformed_records=args.reject_malformed_records)
-    print("== Validation 추출 ==", flush=True)
-    va_dev, dt2, ms2 = read_split(os.path.join(BASE, "Validation", "02.라벨링데이터"), "val", audit=validation_ingestion,
-                                 reject_malformed_records=args.reject_malformed_records)
-    overlap = set(tr_dev) & set(va_dev)
-    if overlap:
-        raise ValueError(f"official asset overlap: {sorted(map(str, overlap))[:5]}")
+    va_dev, dt2, ms2 = {}, set(), set()
+    if args.training_only:
+        print("== Training 전용: 공식 Validation 읽기/중복 검사/재생 생성 미수행 ==", flush=True)
+    else:
+        print("== Validation 추출 ==", flush=True)
+        va_dev, dt2, ms2 = read_split(os.path.join(BASE, "Validation", "02.라벨링데이터"), "val", audit=validation_ingestion,
+                                     reject_malformed_records=args.reject_malformed_records)
+        overlap = set(tr_dev) & set(va_dev)
+        if overlap:
+            raise ValueError(f"official asset overlap: {sorted(map(str, overlap))[:5]}")
 
     if encodings is None:
         # 인코더(두 split 공통, 기존 동작)
@@ -320,38 +330,56 @@ def main(argv=None):
         return (out + (disp,)) if capture_display else out
 
     Xtr, Str, ytr, Gtr, Ttr = build(tr_dev, "train")
-    Xva, Sva, yva, Gva, Tva, disp = build(va_dev, "validation", capture_display=True)
-    if not len(ytr) or not len(yva):
-        raise ValueError("both splits must contain sensor windows")
+    if args.training_only:
+        if not len(ytr):
+            raise ValueError("training split must contain sensor windows")
+    else:
+        Xva, Sva, yva, Gva, Tva, disp = build(va_dev, "validation", capture_display=True)
+        if not len(ytr) or not len(yva):
+            raise ValueError("both splits must contain sensor windows")
     print(f"train: X{Xtr.shape} S{Str.shape} y{ytr.shape}", flush=True)
-    print(f"val:   X{Xva.shape} S{Sva.shape} y{yva.shape}", flush=True)
+    if not args.training_only:
+        print(f"val:   X{Xva.shape} S{Sva.shape} y{yva.shape}", flush=True)
 
     # Claim the destination again after parsing; never merge with another build's files.
     OUT.mkdir(parents=True, exist_ok=False)
     with (OUT / "enhanced_train.npz").open("xb") as stream:
         np.savez_compressed(stream, X=Xtr, S=Str, y=ytr, groups=Gtr, target_times=Ttr)
-    with (OUT / "enhanced_val.npz").open("xb") as stream:
-        np.savez_compressed(stream, X=Xva, S=Sva, y=yva, groups=Gva, target_times=Tva)
+    if not args.training_only:
+        with (OUT / "enhanced_val.npz").open("xb") as stream:
+            np.savez_compressed(stream, X=Xva, S=Sva, y=yva, groups=Gva, target_times=Tva)
 
     # 대시보드 재생용: val 윈도우와 1:1 정렬된 표시정보(enhanced_val.npz와 index 동일)
-    dd = pd.DataFrame(disp, columns=["robot", "deviceType", "x", "y", "degree", "errorCode"])
-    dd["validx"] = np.arange(len(dd))
-    with (OUT / "replay_display.parquet").open("xb") as stream:
-        dd.to_parquet(stream, index=False)
+    if not args.training_only:
+        dd = pd.DataFrame(disp, columns=["robot", "deviceType", "x", "y", "degree", "errorCode"])
+        dd["validx"] = np.arange(len(dd))
+        with (OUT / "replay_display.parquet").open("xb") as stream:
+            dd.to_parquet(stream, index=False)
+    ingestion_splits = {"train": train_ingestion}
+    asset_audit = {"train": sorted(map(str, tr_dev)), "validation": None, "overlap": None}
+    if not args.training_only:
+        ingestion_splits["validation"] = validation_ingestion
+        asset_audit.update({"validation": sorted(map(str, va_dev)), "overlap": 0})
+    metadata = {"err_map": err_map, "devtype_map": devtype_map,
+                "mainstate_map": mainstate_map, "crowd_map": CROWD,
+                "dyn": DYN, "stat": STAT_NUM + ["deviceType", "mainState"],
+                "window_contract": {"history": "30 observations before target", "context": "at target time"},
+                "encoding_audit": encoding_audit,
+                "ingestion_audit": {"schema": "servicerobot.dataset.ingestion.v1",
+                                    "json_member_policy": "case_sensitive_.json_suffix; each_zip_entry",
+                                    "splits": ingestion_splits},
+                "sequence_audit": sequence_audit, "asset_audit": asset_audit}
+    if args.training_only:
+        metadata["build_scope"] = {"mode": "training_only", "purpose": "training_robot_holdout_selection_only",
+                                   "official_validation_read": False, "official_asset_overlap_checked": False,
+                                   "official_validation_windows_created": False, "model_performance_evaluated": False}
     # Publish metadata last so earlier write failures cannot leave usable build metadata.
     with (OUT / "enhanced_meta.json").open("x", encoding="utf-8") as stream:
-        json.dump({"err_map": err_map, "devtype_map": devtype_map,
-                   "mainstate_map": mainstate_map, "crowd_map": CROWD,
-                   "dyn": DYN, "stat": STAT_NUM + ["deviceType", "mainState"],
-                   "window_contract": {"history": "30 observations before target", "context": "at target time"},
-                   "encoding_audit": encoding_audit,
-                   "ingestion_audit": {"schema": "servicerobot.dataset.ingestion.v1",
-                                       "json_member_policy": "case_sensitive_.json_suffix; each_zip_entry",
-                                       "splits": {"train": train_ingestion, "validation": validation_ingestion}},
-                   "sequence_audit": sequence_audit,
-                   "asset_audit": {"train": sorted(map(str, tr_dev)), "validation": sorted(map(str, va_dev)), "overlap": 0}},
-                  stream, ensure_ascii=False, indent=1)
-    print(f"저장 완료: enhanced_* / replay_display.parquet ({len(dd)}행, {dd.robot.nunique()}대)", flush=True)
+        json.dump(metadata, stream, ensure_ascii=False, indent=1)
+    if args.training_only:
+        print(f"저장 완료: enhanced_train.npz / enhanced_meta.json ({len(ytr)}행); 공식 Validation 미생성", flush=True)
+    else:
+        print(f"저장 완료: enhanced_* / replay_display.parquet ({len(dd)}행, {dd.robot.nunique()}대)", flush=True)
 
 
 if __name__ == "__main__":
