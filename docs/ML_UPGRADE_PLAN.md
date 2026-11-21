@@ -2,6 +2,55 @@
 
 최초 기준일: 2026-10-07. 최근 갱신: 2026-11-21. 기존 진단·3D·정비 시스템을 유지하면서 검증 가능한 학습형 PHM 근거와 운영 신뢰성 확장. 아래 미완료 항목은 완료 약속이 아닌 후속 작업 계획. 2026-11-19 원본 확보, 11-20 원본 감사, 11-21 Training 전용 윈도 생성 완료. 실제 진단 성능 개선은 아직 미검증.
 
+## 선택 평가 표본 최소 조건 검사 (2026-11-21 추가)
+
+`class_support_audit`·`audit_diagnosis_holdout.py`와 학습 중단 옵션 추가. 기존 검사는 모든 클래스가 한 건 이상 포함된 로봇 분할을 찾지만, 한 클래스의 선택 표본이 1건이어도 통과할 수 있었음. 새 검사는 **고정된 내부 선택 분할**의 클래스별 실제 윈도·로봇 수를 명시한 최소 조건과 비교. 미달 시 더 유리한 seed를 찾아 재분할하지 않음.
+
+```bash
+# Training 전용 사전 점검. 모델 학습이나 공식 Validation 원본 읽기 없음.
+python src/audit_diagnosis_holdout.py \
+  --data-dir data/datasets/robot-training-only-20261121-gap-unfiltered \
+  --min-selection-rows 20 --min-selection-assets 2 --data-kind aihub_recorded \
+  --report data/experiments/holdout-support-001.json
+
+# 준비된 다른 데이터로 학습할 때도 같은 최소 조건을 명시할 수 있음.
+python src/train_diagnosis.py --data-dir /path/to/prepared-data \
+  --output /path/to/new-experiment --selection-only \
+  --min-selection-rows 20 --min-selection-assets 2
+```
+
+| 구분 | 동작 |
+|---|---|
+| 공통 검사 | 각 클래스의 `rows`와 고유 `assets`를 별도로 비교. 경계값은 포함하며 부족한 클래스·종류·실제값·최소값 기록 |
+| 사전 점검 CLI | Training NPZ·데이터 메타·운영 계약 JSON만 읽음. 원시 센서 배열 검증은 수행하지만 249-feature 행렬·Booster 로딩·학습·공식 Validation 접근은 없음 |
+| 점검 기본값 | 클래스당 20윈도·2로봇. **개발용 공학 기준**이며 검정력·신뢰구간·성능 신뢰성을 보장하는 통계 기준이 아님 |
+| 학습 기본값 | 호환성을 위해 1윈도·1로봇 유지. 더 엄격한 조건은 `--min-selection-rows`·`--min-selection-assets`로 명시해야 적용됨 |
+| 학습 중단 위치 | `train_candidates`의 기존 데이터/특징 로딩 및 분할 뒤, 모델 fit·실험 디렉터리 생성 전. 비용이 있는 특징 계산보다 먼저 확인하려면 별도 점검 CLI 사용 |
+| 기존 전체 사전 점검 | `--preflight-only`에도 같은 조건 전달. 전체 사전 점검은 기존처럼 공식 Validation/비교 파일을 요구하며, Training 전용 점검과 구분 |
+| 기록 | 학습 보고서·시작 JSONL에 실제 선택 support와 기준, 후보 모델 JSON에 기준 저장. 운영 모델 자동 교체 없음 |
+| 보고서 보호 | 새 `--report`만 허용, 기존 파일·디렉터리·링크 거부 및 배타적 저장. 부족한 support/분할 불가 보고서는 종료 코드 2로 보존, 통과는 0. 입력 오류로 실행 자체가 실패하면 완성 보고서는 생성하지 않음 |
+
+윈도 중복으로 로봇 수를 부풀리지 않으며 잘못된 클래스/ID/정책 값은 거부. 최소 조건 통과도 시간 연속성·독립 고장 사건·현장 일반화·모델 성능의 증명은 아님. 동결 메타의 과거 Validation 정보 가능성, 입력 해시의 원자적 스냅샷 미보장 등 기존 한계 유지.
+
+### 실제 데이터 적용
+
+11-21 생성한 필터 미적용 Training 910,019윈도에 `seed=42`, 최소 20윈도·2로봇 적용. 기존 fit 714,801 / selection 195,218윈도 및 로봇 중복 0대 분할을 그대로 사용. 아래 4개 클래스에서 총 5개 미달 사유 확인:
+
+| 선택 데이터 클래스 | 윈도 | 로봇 | 미달 조건 |
+|---|---:|---:|---|
+| E-INF-A | 1 | 1 | 윈도·로봇 |
+| E-RBT-B | 53 | 1 | 로봇 |
+| E-RBT-N | 15 | 5 | 윈도 |
+| E-RBT-S | 10 | 3 | 윈도 |
+
+사전 점검은 `support_gate_passed=false`, 종료 코드 2로 보고서 저장. 실제 `train_diagnosis.py --selection-only --min-selection-rows 20 --min-selection-assets 2 --rounds 1 --normal-ratios 0 --weight-modes unweighted`도 같은 입력으로 실행하여 `insufficient selection support` 오류·종료 코드 2 확인. **이 실행에서는 기존 특징 계산 경로까지 수행됐지만 모델 fit은 하지 않았고 후보 출력 디렉터리도 생성되지 않음.** 기준을 낮추거나 seed를 바꾸어 우회하지 않음.
+
+근거: `data/experiments/holdout-support-20261121/report.json`, `run.log`, `training-gate.log`. 보고서에 NPZ·메타·참조 계약 JSON·코드 SHA256, 실제 클래스별 support, 미달 사유 기록. NPZ·데이터 메타 해시는 앞선 생성 점검값과 일치. 원본/운영 모델/메타/사용자 UI 유지. 이는 실제 데이터 **학습 전 검사 결과**이며, 새 모델 성능이나 과거 Macro-F1 저하 원인 확정 자료가 아님. Accuracy 0.9329 / Macro-F1 0.5838 유지.
+
+검증: 신규 합성 테스트 47개·관련 91개·전체 768개 통과. 임계값 경계, 빈/누락 클래스, 한 로봇의 다수 윈도, 잘못된 ID·라벨·정책, Training 전용 미읽기 보호, 전체 사전 점검과의 동일 판정, 양 학습 모드의 fit 전 거부, 명시적 CLI 기준 전달·저장, 기본 학습 동작 및 보고서 보호 확인. 합성 LightGBM 연결 검사는 절차 검증일 뿐 실데이터 학습 성과가 아님.
+
+다음은 Training 시간 연속성 정책 적용 후 같은 최소 조건을 다시 점검하는 작업. 클래스별 고장 표본이 로봇에 편중된 문제는 최소 조건 검사로 해결되지 않으므로 반복 로봇 분할의 편차와 추가 자료 필요성도 계속 기록.
+
 ## Training 전용 전처리와 실제 윈도 생성 (2026-11-21)
 
 `build_enhanced_dataset.py --training-only` 추가. 공식 Validation을 사용하지 않는 내부 후보 선택용 입력을 준비하는 별도 모드. **기존 전체 빌드의 공식 로봇 중복 검사·기본 인코딩·30시점/249-feature 계약은 유지.**

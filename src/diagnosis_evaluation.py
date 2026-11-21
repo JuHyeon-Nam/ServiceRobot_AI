@@ -139,6 +139,50 @@ def asset_error_analysis(y: np.ndarray, predicted: np.ndarray, groups: np.ndarra
                             "descriptive_not_causal_or_significance_test"]}
 
 
+def validate_support_minima(min_rows_per_class=1, min_assets_per_class=1):
+    values = {"min_rows_per_class": min_rows_per_class, "min_assets_per_class": min_assets_per_class}
+    if any(not isinstance(value, Integral) or isinstance(value, bool) or value < 1 for value in values.values()):
+        raise ValueError("selection support minima must be positive integers")
+    return {key: int(value) for key, value in values.items()}
+
+
+def class_support_audit(labels, groups, names, *, min_rows_per_class=1, min_assets_per_class=1):
+    """Count windows and robot IDs against declared engineering minima, not statistical power."""
+    policy = validate_support_minima(min_rows_per_class, min_assets_per_class)
+    if (not isinstance(names, list) or len(names) < 2 or "정상" not in names
+            or any(not isinstance(name, str) or not name.strip() or name != name.strip() for name in names)
+            or len(set(names)) != len(names)):
+        raise ValueError("support audit needs unique canonical class names including normal")
+    labels, groups = np.asarray(labels), np.asarray(groups)
+    if labels.ndim != 1 or groups.shape != labels.shape:
+        raise ValueError("support audit needs aligned one-dimensional labels and robot IDs")
+    if labels.dtype.kind not in "iu" or (labels < 0).any() or (labels >= len(names)).any():
+        raise ValueError("support audit needs integer class indices within class order")
+    if groups.dtype.kind not in "US":
+        raise ValueError("support audit needs canonical string robot IDs")
+    groups = groups.astype(str, copy=False)
+    if any(not value.strip() or value != value.strip() or value.lower() in {"none", "null", "nan", "nat"}
+           for value in groups):
+        raise ValueError("support audit needs canonical string robot IDs")
+    per_class, issues = {}, []
+    for i, name in enumerate(names):
+        mask = labels == i
+        counts = {"rows": int(mask.sum()), "assets": int(len(np.unique(groups[mask])))}
+        per_class[name] = counts
+        for unit, threshold in (("rows", policy["min_rows_per_class"]), ("assets", policy["min_assets_per_class"])):
+            if counts[unit] < threshold:
+                issues.append({"code": f"insufficient_class_{unit}", "class_name": name,
+                               "actual": counts[unit], "minimum": threshold})
+    return {"schema": "servicerobot.diagnosis.class_support.v1", "class_order": list(names),
+            "unit": "sensor_windows", "policy": policy, "rows": len(labels),
+            "assets": int(len(np.unique(groups))), "per_class": per_class,
+            "sufficient_support": not issues, "issues": issues,
+            "policy_basis": "declared_engineering_minima_not_statistical_power",
+            "limitations": ["overlapping_windows_not_independent_failure_episodes",
+                            "robot_identity_not_independently_verified",
+                            "passing_minima_does_not_prove_reliable_metrics_or_training_readiness"]}
+
+
 def asset_holdout(labels: np.ndarray, groups: np.ndarray, seed: int = 42,
                   test_size: float = 0.2, require_all_classes: bool = False) -> tuple[np.ndarray, np.ndarray]:
     labels, groups = np.asarray(labels), np.asarray(groups).astype(str)

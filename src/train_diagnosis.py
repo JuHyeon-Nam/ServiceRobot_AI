@@ -15,8 +15,9 @@ import numpy as np
 import pandas as pd
 import sklearn
 
-from diagnosis_evaluation import (asset_error_analysis, asset_holdout, class_weights, classification_metrics, macro_f1_eval,
-                                  make_constrained_macro_f1_eval, promotion_gate, select_candidate)
+from diagnosis_evaluation import (asset_error_analysis, asset_holdout, class_support_audit, class_weights,
+                                  classification_metrics, macro_f1_eval, make_constrained_macro_f1_eval,
+                                  promotion_gate, select_candidate, validate_support_minima)
 from pdm_runtime import FEATURE_BATCH_ROWS, MODEL_DYN_IDX, load_booster, make_feature_matrix_batched
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -121,11 +122,14 @@ def record_event(output: Path, event: str, **fields) -> None:
 
 
 def audit_training_data(data_dir: Path, champion_dir: Path, seed: int = 42,
-                        data_kind: str = "unspecified") -> dict:
+                        data_kind: str = "unspecified", min_selection_rows: int = 1,
+                        min_selection_assets: int = 1) -> dict:
+    support_policy = validate_support_minima(min_selection_rows, min_selection_assets)
     report = {"schema": "servicerobot.diagnosis.data_audit.v1", "seed": seed,
               "audited_at_utc": datetime.now(timezone.utc).isoformat(),
               "data_kind": data_kind, "ready_for_candidate_comparison": False,
               "model_performance_evaluated": False, "issues": [], "splits": {},
+              "selection_support_policy": support_policy,
               "raw_sensor_arrays_retained": False,
               "limitations": ["source_authenticity_not_verified", "field_performance_not_evaluated",
                               "saved_booster_contents_not_validated", "engineered_features_not_evaluated"]}
@@ -178,6 +182,12 @@ def audit_training_data(data_dir: Path, champion_dir: Path, seed: int = 42,
                     "selection_assets": sorted(set(train["groups"][selection])),
                     "fit_support": dataset_support(train["y"][fit], train["groups"][fit], names),
                     "selection_support": dataset_support(train["y"][selection], train["groups"][selection], names)}
+                support = class_support_audit(train["y"][selection], train["groups"][selection], names, **support_policy)
+                report["selection_plan"]["support_audit"] = support
+                if not support["sufficient_support"]:
+                    report["issues"].append({"code": "insufficient_selection_support",
+                                             "detail": "selection class support is below configured minima",
+                                             "support_issues": support["issues"]})
             except ValueError as error:
                 report["issues"].append({"code": "holdout_unavailable", "detail": str(error)})
     report["ready_for_candidate_comparison"] = not report["issues"]
@@ -188,7 +198,9 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                      seed: int = 42, rounds: int = 800, max_false_alarm: float = 0.05,
                      normal_ratios: tuple[int | None, ...] = NORMAL_RATIOS,
                      weight_modes: tuple[str, ...] = WEIGHT_MODES, data_kind: str = "unspecified",
-                     iteration_metric: str = "macro_f1", selection_only: bool = False) -> dict:
+                     iteration_metric: str = "macro_f1", selection_only: bool = False,
+                     min_selection_rows: int = 1, min_selection_assets: int = 1) -> dict:
+    support_policy = validate_support_minima(min_selection_rows, min_selection_assets)
     destination, serving = output.resolve(), champion_dir.resolve()
     if destination == serving or destination in serving.parents or serving in destination.parents:
         raise ValueError("candidate output must not overwrite the serving model directory")
@@ -222,6 +234,9 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
         validate_label_coverage(validation["y"], names, "validation")
     normal = names.index("정상")
     fit, selection = asset_holdout(train["y"], train["groups"], seed, require_all_classes=True)
+    support = class_support_audit(train["y"][selection], train["groups"][selection], names, **support_policy)
+    if not support["sufficient_support"]:
+        raise ValueError(f"insufficient selection support: {support['issues']}")
     train_features = pd.DataFrame(train["features"])
     validation_features = pd.DataFrame(validation["features"]) if validation is not None else None
     lineage_files = (("enhanced_train.npz", "enhanced_meta.json") if selection_only else
@@ -255,6 +270,7 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                        "all_candidate_metrics_retained": True}
     output.mkdir(parents=True, exist_ok=True)
     record_event(output, "run_started", seed=seed, rounds=rounds, lineage=lineage,
+                 selection_support_audit=support,
                  selection_only=selection_only, evaluation_scope=evaluation_scope,
                  official_validation_planned=not selection_only,
                  normal_ratios=list(normal_ratios), weight_modes=list(weight_modes), environment=environment,
@@ -349,6 +365,7 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
         "iteration_selection": iteration_selection,
         "feature_construction": feature_construction,
         "candidate_model_retention": model_retention,
+        "selection_support_audit": support,
         "search_space": {"normal_ratios": list(normal_ratios), "weight_modes": list(weight_modes),
                          "candidate_count": len(experiments), "rounds": rounds},
         "selection_protocol": "robot_group_holdout", "official_validation_used_for_selection": False,
@@ -379,6 +396,7 @@ def train_candidates(data_dir: Path, output: Path, champion_dir: Path,
                       "selection_protocol": "robot_group_holdout", "automatic_promotion": False,
                       "evaluation_scope": evaluation_scope, "official_validation_evaluated": not selection_only,
                       "iteration_selection_metric": iteration_metric,
+                      "selection_support_policy": support_policy,
                       "data_kind": data_kind, "candidate_id": winner["candidate_id"]}
     if candidate_metrics is not None:
         candidate_meta.update({"val_acc": candidate_metrics["accuracy"], "val_macro_f1": candidate_metrics["macro_f1"]})
@@ -405,6 +423,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--champion-dir", type=Path, default=ROOT / "data/processed")
     parser.add_argument("--rounds", type=int, default=800)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--min-selection-rows", type=int, default=1,
+                        help="minimum selection windows for every class; engineering gate, not statistical confidence")
+    parser.add_argument("--min-selection-assets", type=int, default=1,
+                        help="minimum selection robot IDs for every class; does not count independent fault episodes")
     parser.add_argument("--max-false-alarm", type=float, default=0.05)
     parser.add_argument("--normal-ratios", nargs="+", type=int, default=[0, 2, 3, 5],
                         help="normal-to-fault caps; 0 keeps all training rows")
@@ -419,12 +441,17 @@ def main(argv: list[str] | None = None) -> int:
                         help="train and select on training robot holdout only; do not open official Validation NPZ")
     parser.add_argument("--preflight-report", type=Path, help="save the preflight JSON to a new file; never overwrite")
     args = parser.parse_args(argv)
+    try:
+        validate_support_minima(args.min_selection_rows, args.min_selection_assets)
+    except ValueError as error:
+        parser.error(str(error))
     if args.selection_only and args.preflight_only:
         parser.error("--selection-only cannot be combined with --preflight-only")
     if args.preflight_report is not None and not args.preflight_only:
         parser.error("--preflight-report requires --preflight-only")
     if args.preflight_only:
-        report = audit_training_data(args.data_dir, args.champion_dir, args.seed, args.data_kind)
+        report = audit_training_data(args.data_dir, args.champion_dir, args.seed, args.data_kind,
+                                     args.min_selection_rows, args.min_selection_assets)
         encoded = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
         if args.preflight_report is not None:
             try:
@@ -442,7 +469,8 @@ def main(argv: list[str] | None = None) -> int:
         report = train_candidates(args.data_dir, args.output, args.champion_dir,
                                   args.seed, args.rounds, args.max_false_alarm,
                                   tuple(None if r == 0 else r for r in args.normal_ratios),
-                                  tuple(args.weight_modes), args.data_kind, args.iteration_metric, args.selection_only)
+                                  tuple(args.weight_modes), args.data_kind, args.iteration_metric, args.selection_only,
+                                  args.min_selection_rows, args.min_selection_assets)
     except (FileNotFoundError, ValueError) as error:
         parser.exit(2, f"Diagnosis experiment: {error}\n")
     summary = {"selected_candidate": report["selected_candidate"], "data_kind": args.data_kind,
