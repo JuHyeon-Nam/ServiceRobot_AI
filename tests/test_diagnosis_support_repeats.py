@@ -57,10 +57,13 @@ def test_single_and_repeated_results_agree_without_ranking_or_reloading(inputs, 
     assert report["unavailable_holdout_count"] == 0 and not report["best_seed_selected"]
     assert not report["official_validation_read"] and not report["model_performance_evaluated"]
     assert report["schema"] == "servicerobot.diagnosis.holdout_support_repeats.v1"
+    assert report["class_holdout_bounds"]["necessary_conditions_passed"]
+    assert report["class_holdout_bounds"]["joint_split_feasible"] is None
     for run in report["runs"]:
         single = inspector.audit_holdout(data, champion, seed=run["seed"], min_selection_rows=8, min_selection_assets=2)
         for field in ("selection_support_audit", "holdout", "support_gate_passed", "issues"):
             assert run[field] == single[field]
+        assert run["class_holdout_bounds"] == single["class_holdout_bounds"]
     assert all(value == {"rows_min": 8, "rows_max": 8, "assets_min": 2, "assets_max": 2,
                          "evaluated_requests": 3, "requests_passing_minima": 3}
                for value in report["selection_support_ranges"].values())

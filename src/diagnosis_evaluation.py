@@ -183,6 +183,57 @@ def class_support_audit(labels, groups, names, *, min_rows_per_class=1, min_asse
                             "passing_minima_does_not_prove_reliable_metrics_or_training_readiness"]}
 
 
+def class_holdout_bounds(labels, groups, names, *, min_selection_rows=20, min_selection_assets=2,
+                         min_fit_rows=1, min_fit_assets=1):
+    """Necessary per-class bounds only; passing does not prove a joint robot split exists."""
+    selection = validate_support_minima(min_selection_rows, min_selection_assets)
+    fit = validate_support_minima(min_fit_rows, min_fit_assets)
+    support = class_support_audit(labels, groups, names)
+    labels, groups = np.asarray(labels), np.asarray(groups).astype(str)
+    per_class, issues = {}, []
+    for code, name in enumerate(names):
+        assets, counts = np.unique(groups[labels == code], return_counts=True)
+        total_rows, total_assets = support["per_class"][name]["rows"], len(assets)
+        required_rows = selection["min_rows_per_class"] + fit["min_rows_per_class"]
+        required_assets = selection["min_assets_per_class"] + fit["min_assets_per_class"]
+
+        def upper_bound(reserved):
+            if total_assets < reserved["min_assets_per_class"] or total_rows < reserved["min_rows_per_class"]:
+                return None
+            least_reserved = max(reserved["min_rows_per_class"],
+                                 int(np.sort(counts)[:reserved["min_assets_per_class"]].sum()))
+            return total_rows - least_reserved
+
+        selection_upper, fit_upper = upper_bound(fit), upper_bound(selection)
+        class_issues = []
+        for unit, actual, required in (("rows", total_rows, required_rows), ("assets", total_assets, required_assets)):
+            if actual < required:
+                class_issues.append({"code": f"insufficient_total_class_{unit}", "class_name": name,
+                                     "actual": actual, "minimum": required})
+        for side, upper, policy in (("selection", selection_upper, selection), ("fit", fit_upper, fit)):
+            if upper is not None and upper < policy["min_rows_per_class"]:
+                class_issues.append({"code": f"{side}_rows_exceed_asset_preserving_upper_bound",
+                                     "class_name": name, "upper_bound": upper,
+                                     "minimum": policy["min_rows_per_class"]})
+        per_class[name] = {"rows": total_rows, "assets": total_assets,
+                           "rows_by_asset": {str(asset): int(count) for asset, count in zip(assets, counts)},
+                           "required_total_rows": required_rows, "required_total_assets": required_assets,
+                           "row_deficit": max(0, required_rows - total_rows),
+                           "asset_deficit": max(0, required_assets - total_assets),
+                           "selection_rows_upper_bound": selection_upper, "fit_rows_upper_bound": fit_upper,
+                           "necessary_conditions_passed": not class_issues, "issues": class_issues}
+        issues.extend(class_issues)
+    return {"schema": "servicerobot.diagnosis.holdout_bounds.v1", "class_order": list(names),
+            "fit_support_policy": fit, "selection_support_policy": selection, "per_class": per_class,
+            "necessary_conditions_passed": not issues, "joint_split_feasible": None, "issues": issues,
+            "split_search_performed": False, "policy_changed": False,
+            "limitations": ["necessary_not_sufficient_per_class_bounds; no_joint_split_solver",
+                            "shared_robot_ids_couple_class_allocations",
+                            "requested_holdout_fraction_and_global_robot_count_not_checked",
+                            "engineering_minima_not_statistical_confidence; robot_identity_not_verified",
+                            "windows_not_independent_fault_events; no_training_readiness_or_model_metric"]}
+
+
 def asset_holdout(labels: np.ndarray, groups: np.ndarray, seed: int = 42,
                   test_size: float = 0.2, require_all_classes: bool = False) -> tuple[np.ndarray, np.ndarray]:
     labels, groups = np.asarray(labels), np.asarray(groups).astype(str)

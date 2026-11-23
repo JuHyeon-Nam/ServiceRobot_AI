@@ -9,7 +9,7 @@ from numbers import Integral
 from pathlib import Path
 import zipfile
 
-from diagnosis_evaluation import asset_holdout, class_support_audit, validate_support_minima
+from diagnosis_evaluation import asset_holdout, class_holdout_bounds, class_support_audit, validate_support_minima
 from train_diagnosis import (DATA_KINDS, ROOT, dataset_support, file_sha256, load_dataset,
                              validate_label_coverage, validate_metadata_contract)
 
@@ -33,6 +33,9 @@ def _load_training_support(data_dir, champion_dir, min_selection_rows, min_selec
               "data_kind": data_kind, "data_kind_source": "caller_declared_not_independently_verified",
               "training_rows": len(rows["y"]),
               "training_support": dataset_support(rows["y"], rows["groups"], names),
+              "class_holdout_bounds": class_holdout_bounds(rows["y"], rows["groups"], names,
+                  min_selection_rows=policy["min_rows_per_class"],
+                  min_selection_assets=policy["min_assets_per_class"]),
               "official_validation_read": False, "feature_matrix_created": False,
               "raw_sensor_arrays_retained": False, "model_trained": False, "model_performance_evaluated": False,
               "training_readiness": "not_evaluated_beyond_selection_support",
