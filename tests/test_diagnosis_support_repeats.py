@@ -157,9 +157,37 @@ def test_repeated_cli_saves_every_request_and_returns_all_requests_policy(inputs
     assert output.read_bytes() == before and not (tmp_path / "absent").exists()
 
 
-def test_cli_seed_modes_are_mutually_exclusive(inputs, tmp_path):
-    data, champion = inputs
+@pytest.mark.parametrize("seed", ["0", "42", "1000"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_cli_seed_modes_are_mutually_exclusive_before_input_io(tmp_path, monkeypatch, seed, reverse):
+    def forbidden(*args, **kwargs):
+        pytest.fail("conflicting seed options must fail before auditing inputs")
+
+    monkeypatch.setattr(inspector, "audit_holdout", forbidden)
+    monkeypatch.setattr(inspector, "audit_repeated_holdouts", forbidden)
+    single, repeated = ["--seed", seed], ["--seeds", "43", "44"]
+    modes = repeated + single if reverse else single + repeated
+    output = tmp_path / "unused.json"
     with pytest.raises(SystemExit) as error:
-        inspector.main(["--data-dir", str(data), "--champion-dir", str(champion), "--report", str(tmp_path / "unused"),
-                        "--seed", "42", "--seeds", "43", "44"])
-    assert error.value.code == 2
+        inspector.main(["--data-dir", str(tmp_path / "absent"), "--report", str(output), *modes])
+    assert error.value.code == 2 and not output.exists()
+
+
+@pytest.mark.parametrize("options,expected_seed", [([], 42), (["--seed", "0"], 0),
+                                                  (["--seed", "42"], 42), (["--seed", "1000"], 1000)])
+def test_cli_applies_single_seed_default_after_parsing(tmp_path, monkeypatch, options, expected_seed):
+    received = []
+
+    def single(*args, **kwargs):
+        received.append(kwargs["seed"])
+        return {"support_gate_passed": True, "seed": kwargs["seed"]}
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("single mode must not call repeated holdouts")
+
+    monkeypatch.setattr(inspector, "audit_holdout", single)
+    monkeypatch.setattr(inspector, "audit_repeated_holdouts", forbidden)
+    output = tmp_path / "single.json"
+    assert inspector.main(["--data-dir", str(tmp_path / "absent"), "--report", str(output), *options]) == 0
+    assert received == [expected_seed]
+    assert json.loads(output.read_text())["seed"] == expected_seed

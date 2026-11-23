@@ -138,7 +138,8 @@ def main(argv=None):
     parser.add_argument("--data-dir", required=True, type=Path)
     parser.add_argument("--champion-dir", type=Path, default=ROOT / "data/processed")
     seed_options = parser.add_mutually_exclusive_group()
-    seed_options.add_argument("--seed", type=int, default=42)
+    # Python 3.11 can ignore an explicit default value in a mutually exclusive group.
+    seed_options.add_argument("--seed", type=int, default=None, help="single starting seed (default: 42)")
     seed_options.add_argument("--seeds", type=int, nargs="+",
                               help="audit all declared starting seeds; no best-seed selection; at most 64")
     parser.add_argument("--min-selection-rows", type=int, default=20)
@@ -151,7 +152,8 @@ def main(argv=None):
     try:
         options = {"min_selection_rows": args.min_selection_rows,
                    "min_selection_assets": args.min_selection_assets, "data_kind": args.data_kind}
-        report = (audit_holdout(args.data_dir, args.champion_dir, seed=args.seed, **options) if args.seeds is None
+        seed = 42 if args.seed is None else args.seed
+        report = (audit_holdout(args.data_dir, args.champion_dir, seed=seed, **options) if args.seeds is None
                   else audit_repeated_holdouts(args.data_dir, args.champion_dir, seeds=args.seeds, **options))
         encoded = json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2)
         args.report.parent.mkdir(parents=True, exist_ok=True)
