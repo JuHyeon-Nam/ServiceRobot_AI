@@ -65,8 +65,13 @@ def parse_record(d):
     return rec
 
 
-def read_split(folder, tag, *, audit=None, reject_malformed_records=False):
+def read_split(folder, tag, *, audit=None, reject_malformed_records=False,
+               include_unassigned_history=False, encoding_metadata=None):
     """Read JSON ZIP entries once; publish counts only after a complete split."""
+    if include_unassigned_history:
+        if tag != "train" or encoding_metadata is None or not reject_malformed_records:
+            raise ValueError("unassigned history requires strict Training input and frozen encoding metadata")
+        from diagnosis_record_quality import record_quality
     zips = sorted(glob.glob(os.path.join(folder, "*.zip")))
     if not zips:
         raise FileNotFoundError(f"no AI-Hub JSON archives in {folder}")
@@ -77,6 +82,8 @@ def read_split(folder, tag, *, audit=None, reject_malformed_records=False):
         entry = {"archive": os.path.basename(zp), "members": 0, "json_members": 0,
                  "non_json_members": 0, "accepted_records": 0, "accepted_by_class": {},
                  "skipped_json": dict.fromkeys(INGEST_SKIP_REASONS, 0)}
+        if include_unassigned_history:
+            entry["history_only_records"] = 0
         with zipfile.ZipFile(zp) as zf:
             for member in zf.infolist():
                 entry["members"] += 1
@@ -84,6 +91,8 @@ def read_split(folder, tag, *, audit=None, reject_malformed_records=False):
                     entry["non_json_members"] += 1
                     continue
                 entry["json_members"] += 1
+                if include_unassigned_history and member.file_size > 8 * 1024 * 1024:
+                    raise ValueError(f"JSON member exceeds experimental history budget: {zp}::{member.filename}")
                 # Archive/CRC/read failures are not malformed-record skips.
                 payload = zf.read(member)
                 try:
@@ -110,11 +119,18 @@ def read_split(folder, tag, *, audit=None, reject_malformed_records=False):
                 if rec["errorCode"] is None:
                     entry["skipped_json"]["missing_error_code"] += 1
                     continue
-                if rec["errorCode"] == "NOT_ASSIGNED":
+                unassigned = rec["errorCode"] == "NOT_ASSIGNED"
+                if unassigned and not include_unassigned_history:
                     entry["skipped_json"]["not_assigned_error_code"] += 1
                     continue
+                if include_unassigned_history:
+                    quality = record_quality(document, rec, encoding_metadata)
+                    if not quality["dynamic_usable"] or (not unassigned and not quality["target_context_usable"]):
+                        raise ValueError(f"raw sensor/context quality rejected in {zp}::{member.filename}: {quality}")
+                    entry["history_only_records"] += int(unassigned)
                 by_dev[rec["deviceId"]].append(rec)
-                devtypes.add(rec["deviceType"]); mainstates.add(rec["mainState"])
+                if not (include_unassigned_history and unassigned):
+                    devtypes.add(rec["deviceType"]); mainstates.add(rec["mainState"])
                 code = rec["errorCode"]
                 entry["accepted_by_class"][code] = entry["accepted_by_class"].get(code, 0) + 1
                 entry["accepted_records"] += 1
@@ -133,6 +149,9 @@ def read_split(folder, tag, *, audit=None, reject_malformed_records=False):
                     "accepted_by_class": dict(class_counts),
                     "skipped_json": {reason: sum(entry["skipped_json"][reason] for entry in archives)
                                      for reason in INGEST_SKIP_REASONS}})
+    if include_unassigned_history:
+        summary["history_only_records"] = sum(entry["history_only_records"] for entry in archives)
+        summary["target_labeled_records"] = n - summary["history_only_records"]
     print(f"  [{tag}] JSON 제외 사유: {summary['skipped_json']}", flush=True)
     if audit is not None:
         audit.update(summary)
@@ -232,9 +251,16 @@ def main(argv=None):
     parser.add_argument("--training-only", action="store_true",
                         help="build Training windows only for internal robot holdout; requires --encoding-meta; "
                              "do not read official Validation or create validation/replay files")
+    parser.add_argument("--include-unassigned-history", action="store_true",
+                        help="experimental Training-only mode: NOT_ASSIGNED sensors may enter history, never targets; "
+                             "requires frozen encoding, explicit gap limit and strict malformed-record rejection")
     args = parser.parse_args(argv)
     if args.training_only and args.encoding_meta is None:
         parser.error("--training-only requires --encoding-meta to preserve the existing encoding contract")
+    if args.include_unassigned_history and (not args.training_only or args.max_gap_seconds is None
+                                            or not args.reject_malformed_records):
+        parser.error("--include-unassigned-history requires --training-only, --encoding-meta, "
+                     "--max-gap-seconds and --reject-malformed-records")
     try:
         _gap_threshold(args.max_gap_seconds)
     except ValueError as error:
@@ -247,10 +273,15 @@ def main(argv=None):
                       "unknown_category_policy": "legacy_defaults"}
     if args.encoding_meta is not None:
         encodings, encoding_audit = load_encoding_metadata(args.encoding_meta)
+    history_options, history_sources = {}, None
+    if args.include_unassigned_history:
+        from audit_diagnosis_continuity import _fingerprints
+        history_sources = _fingerprints(Path(BASE) / "Training/02.라벨링데이터")
+        history_options = {"include_unassigned_history": True, "encoding_metadata": encodings}
     train_ingestion, validation_ingestion = {}, {}
     print("== Training 추출 ==", flush=True)
     tr_dev, dt1, ms1 = read_split(os.path.join(BASE, "Training", "02.라벨링데이터"), "train", audit=train_ingestion,
-                                 reject_malformed_records=args.reject_malformed_records)
+                                 reject_malformed_records=args.reject_malformed_records, **history_options)
     va_dev, dt2, ms2 = {}, set(), set()
     if args.training_only:
         print("== Training 전용: 공식 Validation 읽기/중복 검사/재생 생성 미수행 ==", flush=True)
@@ -278,6 +309,8 @@ def main(argv=None):
         for tag, by_dev in (("train", tr_dev), ("validation", va_dev)):
             for device, records in by_dev.items():
                 for record in records:
+                    if args.include_unassigned_history and record["errorCode"] == "NOT_ASSIGNED":
+                        continue
                     for field, mapping in (("deviceType", devtype_map), ("mainState", mainstate_map), ("errorCode", err_map)):
                         value = record[field]
                         if not isinstance(value, str) or value not in mapping:
@@ -295,6 +328,9 @@ def main(argv=None):
         audit = {"records": 0, "input_assets": len(by_dev), "gaps": 0, "candidate_windows": 0,
                  "discarded_gap_windows": 0, "emitted_windows": 0,
                  "timestamp_basis_assets": {"utc": 0, "naive_shared_clock": 0}}
+        if args.include_unassigned_history:
+            audit.update({"unassigned_target_windows": 0, "labeled_candidate_windows": 0,
+                          "emitted_windows_with_unassigned_history": 0})
         sequence_audit["splits"][tag] = audit
         for dev, recs in by_dev.items():
             recs, sessions, clock = prepare_sequence(recs, dev, args.max_gap_seconds)
@@ -305,17 +341,28 @@ def main(argv=None):
             if len(recs) <= WIN:
                 continue
             dyn = np.array([[r[c] for c in DYN] for r in recs], dtype=np.float32)
-            stat = np.array([[r[c] for c in STAT_NUM] for r in recs], dtype=np.float32)
-            dtv = devtype_map.get(recs[0]["deviceType"], 0)
+            stat = None if args.include_unassigned_history else np.array([[r[c] for c in STAT_NUM] for r in recs], dtype=np.float32)
+            dtv = None if args.include_unassigned_history else devtype_map.get(recs[0]["deviceType"], 0)
+            if args.include_unassigned_history:
+                history_prefix = np.concatenate(([0], np.cumsum([r["errorCode"] == "NOT_ASSIGNED" for r in recs])))
             for i in range(len(recs) - WIN):
+                end = recs[i + WIN]
+                if args.include_unassigned_history:
+                    if end["errorCode"] == "NOT_ASSIGNED":
+                        audit["unassigned_target_windows"] += 1
+                        continue
+                    audit["labeled_candidate_windows"] += 1
                 # Include the target observation in continuity checks, not only its 30-row history.
                 if sessions[i] != sessions[i + WIN]:
                     audit["discarded_gap_windows"] += 1
                     continue
                 Xs.append(dyn[i:i + WIN])
-                end = recs[i + WIN]
                 ms = mainstate_map.get(end["mainState"], 0)
-                Ss.append(np.concatenate([stat[i + WIN], [dtv, ms]]))
+                target_stat = np.array([end[c] for c in STAT_NUM], dtype=np.float32) if args.include_unassigned_history else stat[i + WIN]
+                target_type = devtype_map[end["deviceType"]] if args.include_unassigned_history else dtv
+                Ss.append(np.concatenate([target_stat, [target_type, ms]]))
+                if args.include_unassigned_history:
+                    audit["emitted_windows_with_unassigned_history"] += int(history_prefix[i + WIN] > history_prefix[i])
                 ys.append(err_map[end["errorCode"]])
                 groups.append(str(dev))
                 target_times.append(str(end["createdAt"]))
@@ -341,6 +388,8 @@ def main(argv=None):
     if not args.training_only:
         print(f"val:   X{Xva.shape} S{Sva.shape} y{yva.shape}", flush=True)
 
+    if args.include_unassigned_history and history_sources != _fingerprints(Path(BASE) / "Training/02.라벨링데이터"):
+        raise ValueError("Training archives changed during experimental history build")
     # Claim the destination again after parsing; never merge with another build's files.
     OUT.mkdir(parents=True, exist_ok=False)
     with (OUT / "enhanced_train.npz").open("xb") as stream:
@@ -373,6 +422,16 @@ def main(argv=None):
         metadata["build_scope"] = {"mode": "training_only", "purpose": "training_robot_holdout_selection_only",
                                    "official_validation_read": False, "official_asset_overlap_checked": False,
                                    "official_validation_windows_created": False, "model_performance_evaluated": False}
+    if args.include_unassigned_history:
+        metadata["history_policy"] = {"mode": "experimental_unassigned_dynamic_history_only",
+            "unassigned_targets_created": False, "missing_label_history_included": False,
+            "dynamic_quality_policy": "require_present_finite_float32_raw_fields; no_defaults",
+            "target_context_policy": "require_present_finite_float32_and_frozen_categories; no_defaults",
+            "unassigned_context_used": False, "policy_selected_as_optimal": False,
+            "training_archives": history_sources,
+            "code_sha256": {name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
+                            for name in ("build_enhanced_dataset.py", "diagnosis_record_quality.py",
+                                         "audit_diagnosis_source.py", "audit_diagnosis_continuity.py")}}
     # Publish metadata last so earlier write failures cannot leave usable build metadata.
     with (OUT / "enhanced_meta.json").open("x", encoding="utf-8") as stream:
         json.dump(metadata, stream, ensure_ascii=False, indent=1)
